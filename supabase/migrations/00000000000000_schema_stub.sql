@@ -15,38 +15,53 @@ CREATE TABLE public.users (
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 
 -- repositories: user_id FK -> users, name, source_type enum('upload','git_url'), source_url, file_count, last_viewed_at, created_at
--- CREATE TABLE public.repositories (
---   id uuid PRIMARY KEY,
---   user_id uuid REFERENCES public.users(id),
---   name text,
---   source_type text,
---   source_url text,
---   file_count int,
---   last_viewed_at timestamptz,
---   created_at timestamptz
--- );
+CREATE TABLE public.repositories (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  source_type text NOT NULL CHECK (source_type IN ('upload', 'git_url')),
+  source_url text,
+  file_count int NOT NULL DEFAULT 0,
+  last_viewed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.repositories ENABLE ROW LEVEL SECURITY;
 
 -- repo_files: repo_id FK -> repositories, path, content, language
--- CREATE TABLE public.repo_files (
---   id uuid PRIMARY KEY,
---   repo_id uuid REFERENCES public.repositories(id),
---   path text,
---   content text,
---   language text
--- );
+CREATE TABLE public.repo_files (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  repo_id uuid NOT NULL REFERENCES public.repositories(id) ON DELETE CASCADE,
+  path text NOT NULL,
+  content text,
+  language text
+);
+
+ALTER TABLE public.repo_files ENABLE ROW LEVEL SECURITY;
 
 -- graph_edges: repo_id FK -> repositories, source_file_id FK -> repo_files, target_file_id FK -> repo_files
--- CREATE TABLE public.graph_edges (
---   id uuid PRIMARY KEY,
---   repo_id uuid REFERENCES public.repositories(id),
---   source_file_id uuid REFERENCES public.repo_files(id),
---   target_file_id uuid REFERENCES public.repo_files(id)
--- );
+CREATE TABLE public.graph_edges (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  repo_id uuid NOT NULL REFERENCES public.repositories(id) ON DELETE CASCADE,
+  source_file_id uuid NOT NULL REFERENCES public.repo_files(id) ON DELETE CASCADE,
+  target_file_id uuid NOT NULL REFERENCES public.repo_files(id) ON DELETE CASCADE
+);
+
+ALTER TABLE public.graph_edges ENABLE ROW LEVEL SECURITY;
 
 -- explanations: file_id FK -> repo_files UNIQUE, content (markdown), created_at
--- CREATE TABLE public.explanations (
---   id uuid PRIMARY KEY,
---   file_id uuid REFERENCES public.repo_files(id) UNIQUE,
---   content text,
---   created_at timestamptz
--- );
+CREATE TABLE public.explanations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  file_id uuid NOT NULL UNIQUE REFERENCES public.repo_files(id) ON DELETE CASCADE,
+  content text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.explanations ENABLE ROW LEVEL SECURITY;
+
+-- Indexes for common lookups
+CREATE INDEX ON public.repositories (user_id);
+CREATE INDEX ON public.repo_files (repo_id);
+CREATE INDEX ON public.graph_edges (repo_id);
+CREATE INDEX ON public.graph_edges (source_file_id);
+CREATE INDEX ON public.graph_edges (target_file_id);

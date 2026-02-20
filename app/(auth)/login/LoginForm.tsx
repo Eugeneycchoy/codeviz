@@ -1,8 +1,10 @@
 "use client";
 
 import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Github } from "lucide-react";
+import { getSafeRedirectPath } from "@/lib/redirect";
 
 const GoogleIcon = () => (
   <svg className="h-6 w-6" viewBox="0 0 24 24">
@@ -33,6 +35,8 @@ const Spinner = ({ className = "border-white" }: { className?: string }) => (
 );
 
 export default function LoginForm({ error }: { error?: string }) {
+  const searchParams = useSearchParams();
+  const callbackUrl = getSafeRedirectPath(searchParams.get("callbackUrl"));
   const [loadingProvider, setLoadingProvider] = useState<
     "github" | "google" | null
   >(null);
@@ -41,12 +45,12 @@ export default function LoginForm({ error }: { error?: string }) {
 
   const handleGitHubClick = () => {
     setLoadingProvider("github");
-    signIn("github", { callbackUrl: "/dashboard" });
+    signIn("github", { callbackUrl });
   };
 
   const handleGoogleClick = () => {
     setLoadingProvider("google");
-    signIn("google", { callbackUrl: "/dashboard" });
+    signIn("google", { callbackUrl });
   };
 
   return (

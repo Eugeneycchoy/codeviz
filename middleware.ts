@@ -1,5 +1,6 @@
 /**
- * Protect /dashboard and /repo/* routes. Redirects unauthenticated requests to /login.
+ * Protect /dashboard, /repo/*, and selected API routes. Redirects unauthenticated
+ * requests to /login. API matchers provide defence-in-depth alongside route-level auth().
  */
 import { NextResponse } from "next/server";
 import { auth } from "./lib/auth";
@@ -12,5 +13,10 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/repo/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/repo/:path*",
+    "/api/repo/:path*",
+    "/api/explain",
+  ],
 };

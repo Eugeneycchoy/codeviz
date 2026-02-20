@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
+import { SessionProviderWrapper } from "@/components/SessionProviderWrapper";
 
 export const metadata: Metadata = {
   title: "CodeViz",
@@ -15,8 +16,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-[#fafafa] text-[#1a1a1a] font-sans selection:bg-blue-100">
-        <Navbar />
-        <main>{children}</main>
+        <SessionProviderWrapper>
+          <Navbar />
+          <main>{children}</main>
+        </SessionProviderWrapper>
       </body>
     </html>
   );

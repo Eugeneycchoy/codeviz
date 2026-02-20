@@ -3,19 +3,22 @@ import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 
 /**
- * GET /api/repo/[repoId]/graph
- * Returns { nodes: FileNode[], edges: Edge[] } for React Flow.
- * Auth required. Stub only.
+ * DELETE /api/repo/[slug]
+ * Resolves repo by slug and user; cascade-delete stub.
+ * Auth required.
  */
-export async function GET(
+export async function DELETE(
   _request: Request,
-  { params }: { params: Promise<{ repoId: string }> }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { repoId } = await params;
+  const { slug } = await params;
+  if (!slug) {
+    return NextResponse.json({ error: "Slug required" }, { status: 400 });
+  }
   if (!supabaseAdmin) {
     return NextResponse.json(
       { error: "Server configuration error" },
@@ -25,19 +28,20 @@ export async function GET(
   const { data: repo, error } = await supabaseAdmin
     .from("repositories")
     .select("user_id")
-    .eq("id", repoId)
+    .eq("user_id", session.user.id)
+    .eq("slug", slug)
     .single();
-  if (error) {
+  if (error || !repo) {
     return NextResponse.json(
-      { error: "Server error while fetching repository" },
-      { status: 500 }
+      { error: "Repository not found" },
+      { status: 404 }
     );
   }
-  if (!repo || repo.user_id !== session.user.id) {
+  if (repo.user_id !== session.user.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   return NextResponse.json(
-    { message: `TODO: implement graph for repo ${repoId}` },
+    { message: `TODO: implement delete repo ${slug}` },
     { status: 200 }
   );
 }

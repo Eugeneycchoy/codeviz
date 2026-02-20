@@ -2,12 +2,14 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Upload, GitBranch, Terminal } from "lucide-react";
 
 export default function LandingPage() {
   const [dragActive, setDragActive] = useState(false);
   const [gitUrl, setGitUrl] = useState("");
   const router = useRouter();
+  const { status } = useSession();
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -21,6 +23,12 @@ export default function LandingPage() {
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
+      if (status !== "authenticated") {
+        e.preventDefault();
+        e.stopPropagation();
+        router.push("/login");
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       setDragActive(false);
@@ -28,10 +36,15 @@ export default function LandingPage() {
         router.push("/repo/upload-123");
       }
     },
-    [router]
+    [router, status]
   );
 
   const handleClone = (e: React.FormEvent) => {
+    if (status !== "authenticated") {
+      e.preventDefault();
+      router.push("/login");
+      return;
+    }
     e.preventDefault();
     if (gitUrl) {
       router.push("/repo/clone-456");

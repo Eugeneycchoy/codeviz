@@ -77,6 +77,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
         return token;
       }
+      // Recover userId if the sign-in upsert missed it (e.g. transient DB failure)
+      if (!token.userId && token.email && supabaseAdmin) {
+        const { data } = await supabaseAdmin
+          .from("users")
+          .select("id")
+          .eq("email", token.email)
+          .single();
+        if (data?.id) {
+          token.userId = data.id;
+        }
+      }
       return token;
     },
     session({ session, token }) {

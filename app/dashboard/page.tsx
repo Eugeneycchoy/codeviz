@@ -1,6 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { useEffect, useState, useCallback } from "react";
 import {
   FolderGit2,
   Github,
@@ -15,17 +17,37 @@ import {
 interface Repo {
   id: string;
   name: string;
+  slug: string;
   files: number;
   source: "GitHub" | "Upload";
   lastViewed: string;
 }
 
-const MOCK_REPOS: Repo[] = [
-  { id: "1", name: "visualize-code", files: 127, source: "GitHub", lastViewed: "2 hours ago" },
-  { id: "2", name: "nextjs-app", files: 342, source: "Upload", lastViewed: "Jan 15" },
-  { id: "3", name: "api-gateway", files: 89, source: "GitHub", lastViewed: "Feb 10" },
-  { id: "4", name: "framer-motion-utils", files: 45, source: "GitHub", lastViewed: "Yesterday" },
-];
+type ApiRepo = {
+  id: string;
+  name: string;
+  slug: string;
+  file_count: number;
+  source_type: string;
+  last_viewed_at: string | null;
+  created_at: string;
+};
+
+function formatLastViewed(iso: string | null): string {
+  if (!iso) return "Never";
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins} min ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays} days ago`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+}
 
 function RepoCard({ repo, onClick }: { repo: Repo; onClick: () => void }) {
   return (
@@ -93,6 +115,48 @@ function RepoCard({ repo, onClick }: { repo: Repo; onClick: () => void }) {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { status } = useSession();
+  const [repos, setRepos] = useState<Repo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchRepos = useCallback(async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/repo");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(typeof data.error === "string" ? data.error : "Failed to load repositories");
+        setRepos([]);
+        return;
+      }
+      const data: ApiRepo[] = await res.json();
+      setRepos(
+        data.map((r) => ({
+          id: r.id,
+          name: r.name,
+          slug: r.slug,
+          files: r.file_count,
+          source: r.source_type === "git_url" ? "GitHub" : "Upload",
+          lastViewed: formatLastViewed(r.last_viewed_at),
+        }))
+      );
+    } catch {
+      setError("Failed to load repositories");
+      setRepos([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/login");
+      return;
+    }
+    if (status === "authenticated") fetchRepos();
+  }, [status, router, fetchRepos]);
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-12 space-y-10">
@@ -116,13 +180,44 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {MOCK_REPOS.map((repo) => (
-          <RepoCard key={repo.id} repo={repo} onClick={() => router.push(`/repo/${repo.id}`)} />
-        ))}
-      </div>
+      {loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-64 rounded-[32px] border border-slate-100 bg-slate-50 animate-pulse"
+              aria-hidden
+            />
+          ))}
+        </div>
+      )}
 
-      {MOCK_REPOS.length === 0 && (
+      {error && !loading && (
+        <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-center">
+          <p className="text-red-700 font-medium">{error}</p>
+          <button
+            type="button"
+            onClick={fetchRepos}
+            className="mt-3 text-sm font-semibold text-red-600 hover:text-red-800"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && repos.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {repos.map((repo) => (
+            <RepoCard
+              key={repo.id}
+              repo={repo}
+              onClick={() => router.push(`/repo/${repo.slug}`)}
+            />
+          ))}
+        </div>
+      )}
+
+      {!loading && !error && repos.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-slate-100 rounded-[40px] bg-white space-y-6">
           <div className="p-6 rounded-3xl bg-slate-50">
             <FolderGit2 className="h-12 w-12 text-slate-300" />

@@ -1,14 +1,18 @@
 -- CodeViz schema stub. Tables described in SPEC.md; run when Supabase is connected.
--- Do NOT run this migration until DB client and env are configured.
+-- Run this migration manually via the Supabase dashboard or CLI before testing auth end-to-end.
 
--- users: Supabase auth UID, email, name, avatar_url, created_at
--- CREATE TABLE public.users (
---   id uuid PRIMARY KEY,
---   email text,
---   name text,
---   avatar_url text,
---   created_at timestamptz
--- );
+-- users: app user record synced from NextAuth (email, name, avatar). id is our PK, not Supabase Auth.
+-- We do not add auth.uid() RLS policies here: we use NextAuth (not Supabase Auth). All writes to
+-- public.users go through the service-role admin client, which bypasses RLS.
+CREATE TABLE public.users (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email text UNIQUE NOT NULL,
+  name text,
+  avatar_url text,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 
 -- repositories: user_id FK -> users, name, source_type enum('upload','git_url'), source_url, file_count, last_viewed_at, created_at
 -- CREATE TABLE public.repositories (

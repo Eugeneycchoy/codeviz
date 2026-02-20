@@ -53,7 +53,7 @@ export default function Navbar() {
                     <User className="h-3.5 w-3.5 text-blue-600" />
                   ) : (
                     <Image
-                      src={session.user!.image!}
+                      src={session?.user?.image ?? ""}
                       alt=""
                       width={24}
                       height={24}

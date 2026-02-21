@@ -1,16 +1,30 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Upload, GitBranch, Terminal } from "lucide-react";
+import { Upload, GitBranch, Terminal, Check, X } from "lucide-react";
 
 const ZIP_MAX_BYTES = 50 * 1024 * 1024;
+const STEP_INTERVAL_MS = 2000;
+
+const INGEST_STEPS = [
+  { label: "Parsing files" },
+  { label: "Analysing architecture" },
+  { label: "Building graph" },
+] as const;
 
 type IngestState =
   | { status: "idle" }
   | { status: "loading"; mode: "zip" | "git"; fileName?: string }
-  | { status: "error"; mode: "zip" | "git"; message: string }
+  | {
+      status: "error";
+      mode: "zip" | "git";
+      message: string;
+      aiAnalysisFailed?: boolean;
+      pendingFile?: File;
+      pendingGitUrl?: string;
+    }
   | {
       status: "duplicate";
       mode: "zip" | "git";
@@ -30,9 +44,22 @@ export default function LandingPage() {
   const [dragActive, setDragActive] = useState(false);
   const [gitUrl, setGitUrl] = useState("");
   const [ingestState, setIngestState] = useState<IngestState>({ status: "idle" });
+  const [loadingStep, setLoadingStep] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { status } = useSession();
+
+  useEffect(() => {
+    if (ingestState.status !== "loading") return;
+    const id = setInterval(() => {
+      setLoadingStep((s) => Math.min(s + 1, INGEST_STEPS.length - 1));
+    }, STEP_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [ingestState.status]);
+
+  useEffect(() => {
+    if (ingestState.status !== "loading") setLoadingStep(0);
+  }, [ingestState.status]);
 
   const submitZip = useCallback(
     async (file: File, force = false) => {
@@ -72,11 +99,16 @@ export default function LandingPage() {
           });
           return;
         }
+        const isAiFailed = data.error === "AI_ANALYSIS_FAILED";
         setIngestState({
           status: "error",
           mode: "zip",
           message:
             typeof data.error === "string" ? data.error : "Upload failed. Please try again.",
+          ...(isAiFailed && {
+            aiAnalysisFailed: true,
+            pendingFile: file,
+          }),
         });
       } catch {
         setIngestState({
@@ -116,11 +148,16 @@ export default function LandingPage() {
           });
           return;
         }
+        const isAiFailed = data.error === "AI_ANALYSIS_FAILED";
         setIngestState({
           status: "error",
           mode: "git",
           message:
             typeof data.error === "string" ? data.error : "Clone failed. Please try again.",
+          ...(isAiFailed && {
+            aiAnalysisFailed: true,
+            pendingGitUrl: url,
+          }),
         });
       } catch {
         setIngestState({
@@ -288,9 +325,50 @@ export default function LandingPage() {
                     Max 50 MB • .zip only
                   </p>
                 )}
+                {isZipLoading && ingestState.status === "loading" && (
+                  <ul className="mt-4 space-y-2 text-left max-w-xs mx-auto" aria-live="polite">
+                    {INGEST_STEPS.map((step, i) => (
+                      <li
+                        key={step.label}
+                        className="flex items-center gap-2 text-sm font-medium"
+                      >
+                        {i < loadingStep ? (
+                          <Check className="h-4 w-4 text-green-600 shrink-0" />
+                        ) : i === loadingStep ? (
+                          <Spinner className="h-4 w-4 shrink-0 border-blue-600" />
+                        ) : (
+                          <span className="w-4 h-4 shrink-0 rounded-full border-2 border-slate-200" />
+                        )}
+                        <span className={i <= loadingStep ? "text-slate-700" : "text-slate-400"}>
+                          {step.label}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
-            {zipError && (
+            {ingestState.status === "error" && ingestState.mode === "zip" && ingestState.aiAnalysisFailed && (
+              <div className="mt-3 p-4 rounded-2xl bg-red-50 border border-red-200 space-y-3">
+                <div className="flex items-center gap-2 text-red-700 font-medium">
+                  <X className="h-4 w-4 shrink-0" />
+                  <span>Analysing architecture failed</span>
+                </div>
+                <p className="text-sm text-red-600">
+                  AI analysis could not complete. You can retry or try another repo.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (ingestState.pendingFile) submitZip(ingestState.pendingFile);
+                  }}
+                  className="h-10 px-4 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+            {zipError && !(ingestState.status === "error" && ingestState.aiAnalysisFailed) && (
               <p className="text-sm text-red-600 font-medium text-center" role="alert">
                 {zipError}
               </p>
@@ -336,9 +414,47 @@ export default function LandingPage() {
             </button>
           </form>
           {isGitLoading && (
-            <p className="text-sm text-slate-500 font-medium text-center">Cloning repository…</p>
+            <div className="space-y-2">
+              <p className="text-sm text-slate-500 font-medium text-center">Cloning repository…</p>
+              <ul className="space-y-2 text-left max-w-xs mx-auto" aria-live="polite">
+                {INGEST_STEPS.map((step, i) => (
+                  <li key={step.label} className="flex items-center gap-2 text-sm font-medium">
+                    {i < loadingStep ? (
+                      <Check className="h-4 w-4 text-green-600 shrink-0" />
+                    ) : i === loadingStep ? (
+                      <Spinner className="h-4 w-4 shrink-0 border-blue-600" />
+                    ) : (
+                      <span className="w-4 h-4 shrink-0 rounded-full border-2 border-slate-200" />
+                    )}
+                    <span className={i <= loadingStep ? "text-slate-700" : "text-slate-400"}>
+                      {step.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
-          {gitError && (
+          {ingestState.status === "error" && ingestState.mode === "git" && ingestState.aiAnalysisFailed && (
+            <div className="mt-3 p-4 rounded-2xl bg-red-50 border border-red-200 space-y-3">
+              <div className="flex items-center gap-2 text-red-700 font-medium">
+                <X className="h-4 w-4 shrink-0" />
+                <span>Analysing architecture failed</span>
+              </div>
+              <p className="text-sm text-red-600">
+                AI analysis could not complete. You can retry or try another repo.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (ingestState.pendingGitUrl) submitGitUrl(ingestState.pendingGitUrl);
+                }}
+                className="h-10 px-4 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {gitError && !(ingestState.status === "error" && ingestState.aiAnalysisFailed) && (
             <p className="text-sm text-red-600 font-medium text-center" role="alert">
               {gitError}
             </p>

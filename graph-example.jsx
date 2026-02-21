@@ -1,1113 +1,1056 @@
 import { useState, useMemo } from "react";
-
-const NODE_W = 155;
-const NODE_H = 56;
-const SVG_W = 1020;
-const SVG_H = 480;
-
-const ROLE = {
-  entry: { color: "#6366F1", label: "Entry" },
-  hub: { color: "#D97706", label: "Hub" },
-  shared: { color: "#0891B2", label: "Shared" },
-  leaf: { color: "#9CA3AF", label: "Leaf" },
-};
-
-const ETYPE = {
-  composition: { color: "#818CF8", dash: "", label: "Renders" },
-  data: { color: "#34D399", dash: "6,3", label: "Data flow" },
-  utility: { color: "#F59E0B", dash: "3,3", label: "Utility" },
-};
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Search,
+  ChevronDown,
+  ChevronRight,
+  X,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
 
 const LAYERS = [
   {
-    id: "entry",
-    y: 8,
-    h: 108,
-    bg: "#EEF2FF",
-    title: "📄 Entry Points",
-    sub: "Where users land — pages & layouts",
+    name: "Interface",
+    color: "#818CF8",
+    icon: "🖥️",
+    modules: [
+      {
+        name: "Pages",
+        files: [
+          { id: "pg-home", label: "Home" },
+          { id: "pg-dash", label: "Dashboard" },
+          { id: "pg-settings", label: "Settings" },
+          { id: "pg-billing", label: "Billing" },
+          { id: "pg-login", label: "Login" },
+          { id: "pg-signup", label: "Signup" },
+          { id: "pg-profile", label: "Profile" },
+          { id: "pg-teams", label: "Teams" },
+        ],
+      },
+      {
+        name: "UI Components",
+        files: [
+          { id: "ui-btn", label: "Button" },
+          { id: "ui-modal", label: "Modal" },
+          { id: "ui-input", label: "Input" },
+          { id: "ui-select", label: "Select" },
+          { id: "ui-card", label: "Card" },
+          { id: "ui-toast", label: "Toast" },
+          { id: "ui-avatar", label: "Avatar" },
+          { id: "ui-badge", label: "Badge" },
+        ],
+      },
+      {
+        name: "Layouts",
+        files: [
+          { id: "lay-root", label: "Root Layout" },
+          { id: "lay-dash", label: "Dash Layout" },
+          { id: "lay-auth", label: "Auth Layout" },
+          { id: "lay-sidebar", label: "Sidebar" },
+          { id: "lay-nav", label: "Navbar" },
+        ],
+      },
+      {
+        name: "Features",
+        files: [
+          { id: "ft-stats", label: "Stats Card" },
+          { id: "ft-chart", label: "Chart" },
+          { id: "ft-plans", label: "Plan Picker" },
+          { id: "ft-teamlist", label: "Team List" },
+          { id: "ft-activity", label: "Activity" },
+          { id: "ft-uploads", label: "File Upload" },
+        ],
+      },
+    ],
   },
   {
-    id: "api",
-    y: 128,
-    h: 108,
-    bg: "#ECFDF5",
-    title: "🔌 API Routes",
-    sub: "Server endpoints that handle data",
+    name: "Services",
+    color: "#34D399",
+    icon: "⚙️",
+    modules: [
+      {
+        name: "API Routes",
+        files: [
+          { id: "api-users", label: "Users" },
+          { id: "api-teams", label: "Teams" },
+          { id: "api-billing", label: "Billing" },
+          { id: "api-analytics", label: "Analytics" },
+          { id: "api-upload", label: "Upload" },
+        ],
+      },
+      {
+        name: "Auth",
+        files: [
+          { id: "auth-config", label: "Config" },
+          { id: "auth-providers", label: "Providers" },
+          { id: "auth-callbacks", label: "Callbacks" },
+        ],
+      },
+      {
+        name: "Actions",
+        files: [
+          { id: "act-profile", label: "Profile" },
+          { id: "act-team", label: "Team" },
+          { id: "act-sub", label: "Subscribe" },
+        ],
+      },
+      {
+        name: "Integrations",
+        files: [
+          { id: "int-stripe", label: "Stripe" },
+          { id: "int-email", label: "Email" },
+          { id: "int-s3", label: "S3" },
+          { id: "int-posthog", label: "Posthog" },
+        ],
+      },
+      {
+        name: "Middleware",
+        files: [
+          { id: "mw-auth", label: "Auth Guard" },
+          { id: "mw-rate", label: "Rate Limit" },
+        ],
+      },
+    ],
   },
   {
-    id: "components",
-    y: 248,
-    h: 108,
-    bg: "#FFF7ED",
-    title: "🧩 Components",
-    sub: "Reusable UI building blocks",
+    name: "Data",
+    color: "#FBBF24",
+    icon: "🗄️",
+    modules: [
+      {
+        name: "Database",
+        files: [
+          { id: "db-client", label: "Client" },
+          { id: "db-schema", label: "Schema" },
+          { id: "db-migrate", label: "Migrations" },
+          { id: "db-seed", label: "Seed" },
+        ],
+      },
+      {
+        name: "Queries",
+        files: [
+          { id: "q-users", label: "Users" },
+          { id: "q-teams", label: "Teams" },
+          { id: "q-subs", label: "Subscriptions" },
+          { id: "q-analytics", label: "Analytics" },
+          { id: "q-files", label: "Files" },
+        ],
+      },
+      {
+        name: "Cache",
+        files: [
+          { id: "cache-redis", label: "Redis" },
+          { id: "cache-session", label: "Sessions" },
+          { id: "cache-rate", label: "Rate Store" },
+        ],
+      },
+    ],
   },
   {
-    id: "lib",
-    y: 368,
-    h: 108,
-    bg: "#FDF2F8",
-    title: "📚 Library",
-    sub: "Shared utilities & core logic",
+    name: "Shared",
+    color: "#A78BFA",
+    icon: "🔗",
+    modules: [
+      {
+        name: "Types",
+        files: [
+          { id: "t-user", label: "User" },
+          { id: "t-team", label: "Team" },
+          { id: "t-billing", label: "Billing" },
+          { id: "t-api", label: "API" },
+          { id: "t-analytics", label: "Analytics" },
+        ],
+      },
+      {
+        name: "Validations",
+        files: [
+          { id: "v-user", label: "User" },
+          { id: "v-team", label: "Team" },
+          { id: "v-billing", label: "Billing" },
+        ],
+      },
+      {
+        name: "Utils",
+        files: [
+          { id: "u-cn", label: "cn()" },
+          { id: "u-format", label: "Formatters" },
+          { id: "u-date", label: "Date" },
+          { id: "u-crypto", label: "Crypto" },
+        ],
+      },
+      {
+        name: "Constants",
+        files: [
+          { id: "c-routes", label: "Routes" },
+          { id: "c-plans", label: "Plans" },
+          { id: "c-perms", label: "Permissions" },
+        ],
+      },
+      {
+        name: "Hooks",
+        files: [
+          { id: "h-user", label: "useUser" },
+          { id: "h-team", label: "useTeam" },
+          { id: "h-media", label: "useMedia" },
+          { id: "h-toast", label: "useToast" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "Platform",
+    color: "#F472B6",
+    icon: "🏗️",
+    modules: [
+      {
+        name: "Config",
+        files: [
+          { id: "cfg-pkg", label: "package.json" },
+          { id: "cfg-ts", label: "tsconfig" },
+          { id: "cfg-next", label: "next.config" },
+          { id: "cfg-eslint", label: "eslint" },
+          { id: "cfg-env", label: ".env" },
+        ],
+      },
+      {
+        name: "CI/CD",
+        files: [
+          { id: "ci-test", label: "Test" },
+          { id: "ci-build", label: "Build" },
+          { id: "ci-deploy", label: "Deploy" },
+          { id: "ci-docker", label: "Docker" },
+        ],
+      },
+      {
+        name: "Testing",
+        files: [
+          { id: "test-setup", label: "Setup" },
+          { id: "test-fixtures", label: "Fixtures" },
+          { id: "test-mocks", label: "Mocks" },
+        ],
+      },
+    ],
   },
 ];
-const LM = Object.fromEntries(LAYERS.map((l) => [l.id, l]));
-
-const NODES = [
-  {
-    id: "layout",
-    name: "layout.tsx",
-    path: "app/",
-    layer: "entry",
-    role: "entry",
-    deps: 8,
-    x: 100,
-  },
-  {
-    id: "login",
-    name: "page.tsx",
-    path: "app/(auth)/login/",
-    layer: "entry",
-    role: "entry",
-    deps: 0,
-    x: 420,
-  },
-  {
-    id: "dashboard",
-    name: "page.tsx",
-    path: "app/dashboard/",
-    layer: "entry",
-    role: "entry",
-    deps: 0,
-    x: 730,
-  },
-  {
-    id: "api-explain",
-    name: "route.ts",
-    path: "api/explain/",
-    layer: "api",
-    role: "shared",
-    deps: 1,
-    x: 100,
-  },
-  {
-    id: "api-repo",
-    name: "route.ts",
-    path: "api/repo/",
-    layer: "api",
-    role: "shared",
-    deps: 2,
-    x: 420,
-  },
-  {
-    id: "api-auth",
-    name: "route.ts",
-    path: "api/auth/",
-    layer: "api",
-    role: "shared",
-    deps: 1,
-    x: 730,
-  },
-  {
-    id: "navbar",
-    name: "Navbar.tsx",
-    path: "components/",
-    layer: "components",
-    role: "hub",
-    deps: 3,
-    x: 60,
-  },
-  {
-    id: "session",
-    name: "SessionProvider.tsx",
-    path: "components/",
-    layer: "components",
-    role: "hub",
-    deps: 2,
-    x: 260,
-  },
-  {
-    id: "repo-card",
-    name: "RepoCard.tsx",
-    path: "components/",
-    layer: "components",
-    role: "shared",
-    deps: 2,
-    x: 520,
-  },
-  {
-    id: "code-viewer",
-    name: "CodeViewer.tsx",
-    path: "components/",
-    layer: "components",
-    role: "leaf",
-    deps: 1,
-    x: 780,
-  },
-  {
-    id: "auth",
-    name: "auth.ts",
-    path: "lib/",
-    layer: "lib",
-    role: "hub",
-    deps: 6,
-    x: 100,
-  },
-  {
-    id: "supabase",
-    name: "supabase.ts",
-    path: "lib/",
-    layer: "lib",
-    role: "hub",
-    deps: 5,
-    x: 350,
-  },
-  {
-    id: "parser",
-    name: "parser.ts",
-    path: "lib/",
-    layer: "lib",
-    role: "leaf",
-    deps: 2,
-    x: 590,
-  },
-  {
-    id: "utils",
-    name: "utils.ts",
-    path: "lib/",
-    layer: "lib",
-    role: "leaf",
-    deps: 7,
-    x: 830,
-  },
-];
-const NM = Object.fromEntries(NODES.map((n) => [n.id, n]));
 
 const EDGES = [
-  { from: "layout", to: "navbar", type: "composition", label: "Navbar" },
-  {
-    from: "layout",
-    to: "session",
-    type: "composition",
-    label: "SessionProvider",
-  },
-  {
-    from: "dashboard",
-    to: "repo-card",
-    type: "composition",
-    label: "RepoCard",
-  },
-  { from: "dashboard", to: "api-repo", type: "data", label: "fetch repos" },
-  { from: "login", to: "api-auth", type: "data", label: "signIn()" },
-  { from: "navbar", to: "auth", type: "utility", label: "useSession()" },
-  { from: "session", to: "auth", type: "utility", label: "SessionProvider" },
-  {
-    from: "repo-card",
-    to: "code-viewer",
-    type: "composition",
-    label: "CodeViewer",
-  },
-  { from: "code-viewer", to: "parser", type: "utility", label: "parseCode()" },
-  { from: "api-explain", to: "parser", type: "utility", label: "parseCode()" },
-  {
-    from: "api-explain",
-    to: "auth",
-    type: "utility",
-    label: "validateToken()",
-  },
-  { from: "api-repo", to: "supabase", type: "data", label: "query repos" },
-  { from: "api-auth", to: "auth", type: "utility", label: "authOptions" },
-  { from: "api-auth", to: "supabase", type: "data", label: "query users" },
-  { from: "auth", to: "supabase", type: "data", label: "createClient()" },
-  { from: "navbar", to: "utils", type: "utility", label: "cn()" },
-  { from: "repo-card", to: "utils", type: "utility", label: "formatDate()" },
-  { from: "parser", to: "utils", type: "utility", label: "slugify()" },
+  { from: "pg-dash", to: "api-users" },
+  { from: "pg-dash", to: "api-analytics" },
+  { from: "pg-billing", to: "api-billing" },
+  { from: "pg-teams", to: "api-teams" },
+  { from: "pg-profile", to: "act-profile" },
+  { from: "pg-settings", to: "act-profile" },
+  { from: "pg-dash", to: "h-user" },
+  { from: "pg-teams", to: "h-team" },
+  { from: "pg-login", to: "auth-config" },
+  { from: "pg-signup", to: "auth-config" },
+  { from: "ft-stats", to: "h-user" },
+  { from: "ft-plans", to: "c-plans" },
+  { from: "ft-plans", to: "api-billing" },
+  { from: "ft-teamlist", to: "h-team" },
+  { from: "ft-chart", to: "api-analytics" },
+  { from: "ft-uploads", to: "api-upload" },
+  { from: "ui-btn", to: "u-cn" },
+  { from: "ui-modal", to: "u-cn" },
+  { from: "ui-input", to: "u-cn" },
+  { from: "ui-toast", to: "h-toast" },
+  { from: "lay-sidebar", to: "c-routes" },
+  { from: "lay-nav", to: "h-user" },
+  { from: "lay-dash", to: "mw-auth" },
+  { from: "api-users", to: "q-users" },
+  { from: "api-teams", to: "q-teams" },
+  { from: "api-billing", to: "q-subs" },
+  { from: "api-analytics", to: "q-analytics" },
+  { from: "api-upload", to: "q-files" },
+  { from: "api-users", to: "v-user" },
+  { from: "api-teams", to: "v-team" },
+  { from: "api-billing", to: "v-billing" },
+  { from: "act-profile", to: "q-users" },
+  { from: "act-team", to: "q-teams" },
+  { from: "act-sub", to: "q-subs" },
+  { from: "auth-config", to: "t-user" },
+  { from: "auth-callbacks", to: "q-users" },
+  { from: "int-stripe", to: "q-subs" },
+  { from: "int-stripe", to: "t-billing" },
+  { from: "int-email", to: "t-user" },
+  { from: "mw-auth", to: "auth-config" },
+  { from: "mw-rate", to: "cache-rate" },
+  { from: "q-users", to: "db-client" },
+  { from: "q-teams", to: "db-client" },
+  { from: "q-subs", to: "db-client" },
+  { from: "q-analytics", to: "db-client" },
+  { from: "q-files", to: "db-client" },
+  { from: "q-users", to: "t-user" },
+  { from: "q-teams", to: "t-team" },
+  { from: "q-subs", to: "t-billing" },
+  { from: "q-analytics", to: "t-analytics" },
+  { from: "cache-redis", to: "cfg-env" },
+  { from: "db-client", to: "cfg-env" },
+  { from: "h-user", to: "t-user" },
+  { from: "h-team", to: "t-team" },
 ];
 
-const EXPLAIN = {
-  layout: {
-    sum: "Root layout wrapping all pages. Provides global nav and auth session context to the entire application.",
-    exp: ["RootLayout (default)"],
-    tip: "💡 Start here — every page renders inside this layout. It's the outermost shell of your app.",
-    impact: "High — changes affect every page",
-  },
-  login: {
-    sum: "Login page with email/password and GitHub OAuth. Redirects to the dashboard on successful authentication.",
-    exp: ["LoginPage (default)"],
-    tip: "💡 First page unauthenticated users see. Simple form delegating auth to the API.",
-    impact: "Low — only affects login view",
-  },
-  dashboard: {
-    sum: "Main dashboard showing repos as interactive cards. Fetches the repo list from the API on mount.",
-    exp: ["DashboardPage (default)"],
-    tip: "💡 Primary page after login. Great for tracing data flow from UI → API → DB.",
-    impact: "Medium — main dashboard view",
-  },
-  "api-explain": {
-    sum: "POST endpoint accepting code and returning AI explanations. Validates auth, parses code, calls the LLM.",
-    exp: ["POST handler"],
-    tip: "💡 Core AI feature endpoint. Trace dependencies to understand the explain pipeline.",
-    impact: "Medium — core feature",
-  },
-  "api-repo": {
-    sum: "CRUD API for repositories. Handles listing, creating, and deleting tracked repos in Supabase.",
-    exp: ["GET, POST, DELETE"],
-    tip: "💡 All repository data flows through here.",
-    impact: "Medium — repo operations",
-  },
-  "api-auth": {
-    sum: "NextAuth catch-all route handling OAuth callbacks, session management, and JWT operations.",
-    exp: ["GET, POST (NextAuth)"],
-    tip: "💡 Handles login, logout, and session refresh. Configured via authOptions.",
-    impact: "High — auth infrastructure",
-  },
-  navbar: {
-    sum: "Top navigation bar with logo, links, and session-aware user avatar. Shows login button or user menu.",
-    exp: ["Navbar (default)"],
-    tip: "💡 Hub component on every page. Good entry point for understanding the UI.",
-    impact: "Medium — visible everywhere",
-  },
-  session: {
-    sum: "Client wrapper providing NextAuth session context to all child components in the tree.",
-    exp: ["SessionProviderWrapper"],
-    tip: "💡 Required for any component using useSession(). Wraps entire app.",
-    impact: "High — removing breaks auth UI",
-  },
-  "repo-card": {
-    sum: "Card component showing repo info: name, language, last analyzed timestamp. Expandable for code view.",
-    exp: ["RepoCard (default)"],
-    tip: "💡 Used in the dashboard grid. Click connections to trace composition.",
-    impact: "Low — repo display only",
-  },
-  "code-viewer": {
-    sum: "Syntax-highlighted code display with line numbers, copy button, and language detection.",
-    exp: ["CodeViewer (default)"],
-    tip: "💡 Leaf component — nothing depends on it. Safe to modify in isolation.",
-    impact: "Low — contained leaf",
-  },
-  auth: {
-    sum: "Core auth module. Configures NextAuth providers, JWT handling, exports session utilities used across the app.",
-    exp: ["authOptions", "validateToken()", "useSession()", "SessionProvider"],
-    tip: "🔑 HUB file — 6 files depend on this. Wide blast radius. Modify with caution.",
-    impact: "High — foundational auth",
-  },
-  supabase: {
-    sum: "Supabase client setup and typed database connection. Single source of truth for all DB access.",
-    exp: ["createClient()", "db", "Database (type)"],
-    tip: "🔑 Deepest dependency. Every data operation ultimately flows through here.",
-    impact: "High — database foundation",
-  },
-  parser: {
-    sum: "Code parsing utilities: tokenizer, AST extraction, formatting. Pure functions with no side effects.",
-    exp: ["parseCode()", "tokenize()", "extractExports()"],
-    tip: "💡 Pure utility module. Easy to test. Core of the explain feature.",
-    impact: "Medium — affects explain",
-  },
-  utils: {
-    sum: "General helpers: className merger (cn), date formatting, slugification, debounce.",
-    exp: ["cn()", "formatDate()", "slugify()", "debounce()"],
-    tip: "💡 Most-imported file (7 deps) but each function is independent and low-risk.",
-    impact: "Low per fn — widely used",
-  },
+const CW = 860,
+  PAD = 28,
+  MOD_W = 148,
+  MOD_G = 14,
+  F_H = 26,
+  MOD_H = 38,
+  MOD_PB = 6,
+  L_H = 22,
+  L_G = 12;
+
+const btnSt = {
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+  padding: "4px 10px",
+  borderRadius: 6,
+  border: "1px solid rgba(255,255,255,0.06)",
+  background: "rgba(255,255,255,0.04)",
+  color: "#94A3B8",
+  fontSize: 10,
+  fontWeight: 600,
+  cursor: "pointer",
+  fontFamily: "inherit",
 };
 
-function nodeRect(n) {
-  const l = LM[n.layer];
-  const ny = l.y + l.h - NODE_H - 8;
-  return {
-    x: n.x,
-    y: ny,
-    cx: n.x + NODE_W / 2,
-    cy: ny + NODE_H / 2,
-    b: ny + NODE_H,
-    t: ny,
-  };
-}
+export default function ArchView() {
+  const [expanded, setExpanded] = useState(
+    () => new Set(["Interface/Pages", "Services/API Routes"]),
+  );
+  const [search, setSearch] = useState("");
+  const [hovFile, setHovFile] = useState(null);
+  const [selFile, setSelFile] = useState(null);
 
-function edgePath(e) {
-  const s = nodeRect(NM[e.from]);
-  const t = nodeRect(NM[e.to]);
-  if (NM[e.from].layer === NM[e.to].layer) {
-    const left = s.cx < t.cx;
-    const sx = left ? s.x + NODE_W : s.x;
-    const tx = left ? t.x : t.x + NODE_W;
-    const my = Math.max(s.cy, t.cy) + 25;
-    return (
-      "M " +
-      sx +
-      " " +
-      s.cy +
-      " Q " +
-      (sx + tx) / 2 +
-      " " +
-      my +
-      ", " +
-      tx +
-      " " +
-      t.cy
+  const { fileMap, allModKeys } = useMemo(() => {
+    const fm = {};
+    const mk = [];
+    LAYERS.forEach((l) =>
+      l.modules.forEach((m) => {
+        const k = `${l.name}/${m.name}`;
+        mk.push(k);
+        m.files.forEach((f) => {
+          fm[f.id] = { ...f, modKey: k, layer: l, modName: m.name };
+        });
+      }),
     );
-  }
-  const dy = t.t - s.b;
-  return (
-    "M " +
-    s.cx +
-    " " +
-    s.b +
-    " C " +
-    s.cx +
-    " " +
-    (s.b + dy * 0.45) +
-    ", " +
-    t.cx +
-    " " +
-    (t.t - dy * 0.45) +
-    ", " +
-    t.cx +
-    " " +
-    t.t
-  );
-}
+    return { fileMap: fm, allModKeys: mk };
+  }, []);
 
-function edgeMid(e) {
-  const s = nodeRect(NM[e.from]);
-  const t = nodeRect(NM[e.to]);
-  if (NM[e.from].layer === NM[e.to].layer) {
-    const left = s.cx < t.cx;
-    const sx = left ? s.x + NODE_W : s.x;
-    const tx = left ? t.x : t.x + NODE_W;
-    return { x: (sx + tx) / 2, y: Math.max(s.cy, t.cy) + 16 };
-  }
-  return { x: (s.cx + t.cx) / 2, y: (s.b + t.t) / 2 };
-}
+  const layout = useMemo(() => {
+    const avail = CW - 2 * PAD;
+    const layers = [];
+    let curY = 12;
+    LAYERS.forEach((l) => {
+      const lY = curY;
+      curY += L_H + 8;
+      const N = l.modules.length;
+      const totalW = N * MOD_W + (N - 1) * MOD_G;
+      const startX = PAD + (avail - totalW) / 2;
+      let maxH = MOD_H;
+      const mods = [];
+      l.modules.forEach((m, i) => {
+        const k = `${l.name}/${m.name}`;
+        const isExp = expanded.has(k);
+        const h = isExp ? MOD_H + m.files.length * F_H + MOD_PB : MOD_H;
+        maxH = Math.max(maxH, h);
+        const mx = startX + i * (MOD_W + MOD_G);
+        const my = curY;
+        const files = isExp
+          ? m.files.map((f, fi) => ({
+              id: f.id,
+              label: f.label,
+              cx: mx + MOD_W / 2,
+              cy: my + MOD_H + fi * F_H + F_H / 2,
+              localTop: MOD_H + fi * F_H,
+            }))
+          : [];
+        mods.push({
+          key: k,
+          name: m.name,
+          x: mx,
+          y: my,
+          w: MOD_W,
+          h,
+          isExp,
+          files,
+          fileCount: m.files.length,
+          midX: mx + MOD_W / 2,
+          midY: my + h / 2,
+        });
+      });
+      curY += maxH + 16;
+      layers.push({
+        name: l.name,
+        color: l.color,
+        icon: l.icon,
+        y: lY,
+        h: curY - lY,
+        mods,
+      });
+      curY += L_G;
+    });
+    return { layers, totalH: curY + 8 };
+  }, [expanded]);
 
-function getConnected(id) {
-  const s = new Set();
-  EDGES.forEach(function (e) {
-    if (e.from === id) s.add(e.to);
-    if (e.to === id) s.add(e.from);
-  });
-  return s;
-}
+  const { filePos, modPos } = useMemo(() => {
+    const fp = {},
+      mp = {};
+    layout.layers.forEach((l) =>
+      l.mods.forEach((m) => {
+        mp[m.key] = { cx: m.midX, cy: m.midY };
+        m.files.forEach((f) => {
+          fp[f.id] = { x: f.cx, y: f.cy };
+        });
+      }),
+    );
+    return { filePos: fp, modPos: mp };
+  }, [layout]);
 
-function Section({ title, children }) {
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <h3
-        style={{
-          margin: "0 0 5px",
-          fontSize: 10,
-          fontWeight: 600,
-          color: "#64748B",
-          textTransform: "uppercase",
-          letterSpacing: 0.5,
-        }}
-      >
-        {title}
-      </h3>
-      {children}
-    </div>
-  );
-}
+  const focal = selFile || hovFile;
+  const { litEdges, litFiles } = useMemo(() => {
+    if (!focal) return { litEdges: [], litFiles: new Set() };
+    const es = EDGES.filter((e) => e.from === focal || e.to === focal);
+    const fs = new Set([focal]);
+    es.forEach((e) => {
+      fs.add(e.from);
+      fs.add(e.to);
+    });
+    return { litEdges: es, litFiles: fs };
+  }, [focal]);
+  const hasHL = litFiles.size > 0;
+  const litMods = useMemo(() => {
+    const s = new Set();
+    litFiles.forEach((id) => {
+      if (fileMap[id]) s.add(fileMap[id].modKey);
+    });
+    return s;
+  }, [litFiles, fileMap]);
 
-export default function App() {
-  const [sel, setSel] = useState(null);
-  const [hov, setHov] = useState(null);
-  const [filter, setFilter] = useState("all");
-
-  const active = hov || sel;
-  const conn = useMemo(
-    function () {
-      return active ? getConnected(active) : new Set();
-    },
-    [active],
-  );
-  const nodeOk = function (id) {
-    return !active || id === active || conn.has(id);
-  };
-  const edgeHi = function (e) {
-    return !active || e.from === active || e.to === active;
-  };
-  const edgeVis = function (e) {
-    return filter === "all" || e.type === filter;
-  };
-
-  const selN = sel ? NM[sel] : null;
-  const selE = sel ? EXPLAIN[sel] : null;
-  const selEdges = useMemo(
-    function () {
-      return sel
-        ? EDGES.filter(function (e) {
-            return e.from === sel || e.to === sel;
-          })
-        : [];
-    },
-    [sel],
-  );
-
-  const layoutR = nodeRect(NM["layout"]);
+  const toggle = (k) =>
+    setExpanded((p) => {
+      const n = new Set(p);
+      n.has(k) ? n.delete(k) : n.add(k);
+      return n;
+    });
+  const results = search
+    ? Object.values(fileMap)
+        .filter(
+          (f) =>
+            f.label.toLowerCase().includes(search.toLowerCase()) ||
+            f.modName.toLowerCase().includes(search.toLowerCase()),
+        )
+        .slice(0, 10)
+    : [];
 
   return (
     <div
+      onClick={() => setSelFile(null)}
       style={{
-        display: "flex",
-        height: "100vh",
-        fontFamily:
-          "Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif",
-        background: "#F8FAFC",
-        color: "#1E293B",
+        minHeight: "100vh",
+        background: "#0B0F1A",
+        fontFamily: "Inter,-apple-system,sans-serif",
+        color: "#E2E8F0",
       }}
     >
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          minWidth: 0,
-        }}
-      >
+      <div style={{ maxWidth: CW, margin: "0 auto", padding: "16px 20px 0" }}>
         <div
           style={{
-            padding: "10px 20px",
-            borderBottom: "1px solid #E2E8F0",
-            background: "white",
             display: "flex",
             alignItems: "center",
-            gap: 16,
+            justifyContent: "space-between",
             flexWrap: "wrap",
+            gap: 8,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div
               style={{
-                background: "linear-gradient(135deg,#6366F1,#8B5CF6)",
-                color: "white",
+                width: 9,
+                height: 9,
+                borderRadius: "50%",
+                background: "#34D399",
+                boxShadow: "0 0 8px #34D39966",
+              }}
+            />
+            <span
+              style={{
+                fontSize: 17,
                 fontWeight: 800,
-                fontSize: 13,
-                padding: "4px 10px",
-                borderRadius: 6,
+                letterSpacing: "-0.03em",
               }}
             >
-              CV
-            </div>
-            <span style={{ fontWeight: 700, fontSize: 15 }}>CodeViz</span>
-            <span style={{ color: "#CBD5E1" }}>/</span>
-            <span style={{ color: "#64748B", fontSize: 13 }}>
-              Dependency Graph
+              acme-saas
+            </span>
+            <span style={{ fontSize: 10, color: "#475569" }}>
+              {Object.keys(fileMap).length} files · {allModKeys.length} modules
             </span>
           </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-            {["all", "composition", "data", "utility"].map(function (f) {
-              return (
-                <button
-                  key={f}
-                  onClick={function () {
-                    setFilter(f);
-                  }}
-                  style={{
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    border: filter === f ? "none" : "1px solid #E2E8F0",
-                    background:
-                      filter === f
-                        ? f === "all"
-                          ? "#334155"
-                          : ETYPE[f].color
-                        : "white",
-                    color: filter === f ? "white" : "#64748B",
-                    fontSize: 11,
-                    fontWeight: filter === f ? 600 : 400,
-                    cursor: "pointer",
-                  }}
-                >
-                  {f === "all" ? "All connections" : ETYPE[f].label}
-                </button>
-              );
-            })}
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={() => setExpanded(new Set(allModKeys))}
+              style={btnSt}
+            >
+              <Maximize2 size={11} /> Expand
+            </button>
+            <button onClick={() => setExpanded(new Set())} style={btnSt}>
+              <Minimize2 size={11} /> Collapse
+            </button>
           </div>
         </div>
-
-        <div style={{ flex: 1, padding: 8, overflow: "auto" }}>
-          <svg
-            viewBox={"0 0 " + SVG_W + " " + SVG_H}
-            style={{ width: "100%", height: "100%" }}
-            onClick={function () {
-              setSel(null);
+        <div style={{ position: "relative", margin: "10px 0 6px" }}>
+          <Search
+            size={13}
+            style={{ position: "absolute", left: 10, top: 9, color: "#475569" }}
+          />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search files or modules..."
+            style={{
+              width: "100%",
+              padding: "7px 30px",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 8,
+              color: "#E2E8F0",
+              fontSize: 11,
+              outline: "none",
+              boxSizing: "border-box",
             }}
-          >
-            <defs>
-              <filter id="sh" x="-4%" y="-4%" width="108%" height="116%">
-                <feDropShadow
-                  dx="0"
-                  dy="1"
-                  stdDeviation="2"
-                  floodColor="#000"
-                  floodOpacity=".06"
-                />
-              </filter>
-              {Object.entries(ETYPE).map(function (entry) {
-                var k = entry[0];
-                var v = entry[1];
-                return (
-                  <marker
-                    key={k}
-                    id={"a-" + k}
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="5"
-                    markerHeight="5"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M0 0L10 5L0 10z" fill={v.color} />
-                  </marker>
-                );
-              })}
-            </defs>
-
-            {LAYERS.map(function (l) {
-              return (
-                <g key={l.id}>
-                  <rect
-                    x={4}
-                    y={l.y}
-                    width={SVG_W - 8}
-                    height={l.h}
-                    rx={10}
-                    fill={l.bg}
-                    opacity={0.55}
-                  />
-                  <text
-                    x={18}
-                    y={l.y + 20}
-                    fontSize={12}
-                    fontWeight={700}
-                    fill="#374151"
-                    style={{ pointerEvents: "none" }}
-                  >
-                    {l.title}
-                  </text>
-                  <text
-                    x={18}
-                    y={l.y + 34}
-                    fontSize={9}
-                    fill="#9CA3AF"
-                    style={{ pointerEvents: "none" }}
-                  >
-                    {l.sub}
-                  </text>
-                </g>
-              );
-            })}
-
-            {!active && (
-              <g style={{ pointerEvents: "none" }}>
-                <rect
-                  x={48}
-                  y={layoutR.cy - 10}
-                  width={40}
-                  height={20}
-                  rx={4}
-                  fill="#6366F1"
-                >
-                  <animate
-                    attributeName="opacity"
-                    values="1;0.5;1"
-                    dur="2s"
-                    repeatCount="indefinite"
-                  />
-                </rect>
-                <text
-                  x={68}
-                  y={layoutR.cy + 3.5}
-                  textAnchor="middle"
-                  fontSize={7.5}
-                  fontWeight={700}
-                  fill="white"
-                >
-                  START
-                  <animate
-                    attributeName="opacity"
-                    values="1;0.5;1"
-                    dur="2s"
-                    repeatCount="indefinite"
-                  />
-                </text>
-              </g>
-            )}
-
-            {EDGES.map(function (e, i) {
-              if (!edgeVis(e)) return null;
-              var hi = edgeHi(e);
-              var st = ETYPE[e.type];
-              var mid = edgeMid(e);
-              var lw = e.label.length * 4.5 + 14;
-              return (
-                <g
-                  key={i}
-                  opacity={hi ? (active ? 0.95 : 0.3) : 0.05}
-                  style={{ transition: "opacity .2s", pointerEvents: "none" }}
-                >
-                  <path
-                    d={edgePath(e)}
-                    fill="none"
-                    stroke={st.color}
-                    strokeWidth={hi && active ? 2 : 1.2}
-                    strokeDasharray={st.dash}
-                    markerEnd={"url(#a-" + e.type + ")"}
-                  />
-                  {hi && active && (
-                    <g>
-                      <rect
-                        x={mid.x - lw / 2}
-                        y={mid.y - 8}
-                        width={lw}
-                        height={16}
-                        rx={4}
-                        fill="white"
-                        stroke={st.color}
-                        strokeWidth={0.5}
-                        opacity={0.95}
-                      />
-                      <text
-                        x={mid.x}
-                        y={mid.y + 3}
-                        textAnchor="middle"
-                        fontSize={7.5}
-                        fontWeight={600}
-                        fill={st.color}
-                      >
-                        {e.label}
-                      </text>
-                    </g>
-                  )}
-                </g>
-              );
-            })}
-
-            {NODES.map(function (n) {
-              var r = nodeRect(n);
-              var ro = ROLE[n.role];
-              var vis = nodeOk(n.id);
-              var isSel = sel === n.id;
-              var isHov = hov === n.id;
-              var bw = ro.label.length * 5.2 + 12;
-              return (
-                <g
-                  key={n.id}
-                  opacity={vis ? 1 : 0.1}
-                  style={{ cursor: "pointer", transition: "opacity .2s" }}
-                  onClick={function (ev) {
-                    ev.stopPropagation();
-                    setSel(sel === n.id ? null : n.id);
+          />
+          {search && (
+            <X
+              size={13}
+              onClick={() => setSearch("")}
+              style={{
+                position: "absolute",
+                right: 10,
+                top: 9,
+                color: "#475569",
+                cursor: "pointer",
+              }}
+            />
+          )}
+          {results.length > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                top: 36,
+                left: 0,
+                right: 0,
+                zIndex: 200,
+                background: "#1E293B",
+                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 8,
+                maxHeight: 200,
+                overflowY: "auto",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+              }}
+            >
+              {results.map((f) => (
+                <div
+                  key={f.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded((p) => new Set([...p, f.modKey]));
+                    setSelFile(f.id);
+                    setSearch("");
                   }}
-                  onMouseEnter={function () {
-                    setHov(n.id);
-                  }}
-                  onMouseLeave={function () {
-                    setHov(null);
-                  }}
-                >
-                  <rect
-                    x={r.x}
-                    y={r.y}
-                    width={NODE_W}
-                    height={NODE_H}
-                    rx={8}
-                    fill="white"
-                    stroke={isSel || isHov ? ro.color : "#E2E8F0"}
-                    strokeWidth={isSel ? 2.5 : isHov ? 1.5 : 1}
-                    filter="url(#sh)"
-                  />
-                  <rect
-                    x={r.x + 1}
-                    y={r.y + 6}
-                    width={3}
-                    height={NODE_H - 12}
-                    rx={1.5}
-                    fill={ro.color}
-                  />
-                  <text
-                    x={r.x + 12}
-                    y={r.y + 18}
-                    fontSize={11}
-                    fontWeight={700}
-                    fill="#1E293B"
-                  >
-                    {n.name}
-                  </text>
-                  <text x={r.x + 12} y={r.y + 30} fontSize={8} fill="#94A3B8">
-                    {n.path}
-                  </text>
-                  <rect
-                    x={r.x + 12}
-                    y={r.y + 36}
-                    width={bw}
-                    height={14}
-                    rx={3}
-                    fill={ro.color}
-                    opacity={0.1}
-                  />
-                  <text
-                    x={r.x + 18}
-                    y={r.y + 46}
-                    fontSize={7}
-                    fontWeight={600}
-                    fill={ro.color}
-                  >
-                    {ro.label}
-                  </text>
-                  {n.deps > 0 && (
-                    <g>
-                      <circle
-                        cx={r.x + NODE_W - 14}
-                        cy={r.y + 14}
-                        r={9}
-                        fill={ro.color}
-                        opacity={0.1}
-                      />
-                      <text
-                        x={r.x + NODE_W - 14}
-                        y={r.y + 17.5}
-                        textAnchor="middle"
-                        fontSize={8.5}
-                        fontWeight={700}
-                        fill={ro.color}
-                      >
-                        {n.deps}
-                      </text>
-                    </g>
-                  )}
-                </g>
-              );
-            })}
-          </svg>
-        </div>
-
-        <div
-          style={{
-            padding: "8px 16px",
-            borderTop: "1px solid #E2E8F0",
-            background: "white",
-            display: "flex",
-            gap: 14,
-            alignItems: "center",
-            fontSize: 11,
-            color: "#64748B",
-            flexWrap: "wrap",
-          }}
-        >
-          <b style={{ color: "#475569" }}>Roles:</b>
-          {Object.entries(ROLE).map(function (entry) {
-            var k = entry[0];
-            var v = entry[1];
-            return (
-              <span
-                key={k}
-                style={{ display: "flex", alignItems: "center", gap: 4 }}
-              >
-                <span
                   style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 2,
-                    background: v.color,
-                    display: "inline-block",
+                    padding: "6px 12px",
+                    cursor: "pointer",
+                    fontSize: 10,
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    borderBottom: "1px solid rgba(255,255,255,0.04)",
                   }}
-                />{" "}
-                {v.label}
-              </span>
-            );
-          })}
-          <span
-            style={{
-              width: 1,
-              height: 14,
-              background: "#E2E8F0",
-              display: "inline-block",
-            }}
-          />
-          <b style={{ color: "#475569" }}>Edges:</b>
-          {Object.entries(ETYPE).map(function (entry) {
-            var k = entry[0];
-            var v = entry[1];
-            return (
-              <span
-                key={k}
-                style={{ display: "flex", alignItems: "center", gap: 4 }}
-              >
-                <svg width={16} height={4}>
-                  <line
-                    x1={0}
-                    y1={2}
-                    x2={16}
-                    y2={2}
-                    stroke={v.color}
-                    strokeWidth={2}
-                    strokeDasharray={v.dash}
-                  />
-                </svg>
-                {v.label}
-              </span>
-            );
-          })}
-          <span
-            style={{
-              width: 1,
-              height: 14,
-              background: "#E2E8F0",
-              display: "inline-block",
-            }}
-          />
-          <span style={{ color: "#94A3B8" }}>
-            Hover to highlight · Click to explore
-          </span>
+                >
+                  <span style={{ color: f.layer.color, fontWeight: 600 }}>
+                    {f.label}
+                  </span>
+                  <span
+                    style={{
+                      color: "#475569",
+                      fontSize: 8,
+                      marginLeft: "auto",
+                    }}
+                  >
+                    {f.modKey}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
+        <p style={{ fontSize: 9.5, color: "#334155", margin: 0 }}>
+          Click modules to expand · Hover files to trace dependencies · Click to
+          pin
+        </p>
       </div>
 
       <div
         style={{
-          width: sel ? 320 : 0,
-          transition: "width .25s ease",
-          borderLeft: sel ? "1px solid #E2E8F0" : "none",
-          background: "white",
-          overflow: "hidden",
-          flexShrink: 0,
+          maxWidth: CW,
+          margin: "0 auto",
+          position: "relative",
+          height: layout.totalH,
         }}
       >
-        {sel && selN && selE && (
-          <div
-            style={{
-              width: 320,
-              padding: "20px 16px",
-              height: "100%",
-              overflowY: "auto",
-              boxSizing: "border-box",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                marginBottom: 14,
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    display: "inline-block",
-                    padding: "2px 8px",
-                    borderRadius: 4,
-                    background: ROLE[selN.role].color,
-                    color: "white",
-                    fontSize: 9,
-                    fontWeight: 700,
-                    marginBottom: 6,
-                  }}
-                >
-                  {ROLE[selN.role].label.toUpperCase()}
-                </div>
-                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>
-                  {selN.name}
-                </h2>
-                <p
-                  style={{ margin: "2px 0 0", fontSize: 11, color: "#94A3B8" }}
-                >
-                  {selN.path + selN.name}
-                </p>
-              </div>
-              <button
-                onClick={function (e) {
-                  e.stopPropagation();
-                  setSel(null);
-                }}
-                style={{
-                  background: "#F1F5F9",
-                  border: "none",
-                  borderRadius: 6,
-                  width: 26,
-                  height: 26,
-                  cursor: "pointer",
-                  fontSize: 13,
-                  color: "#64748B",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <Section title="Summary">
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 12.5,
-                  lineHeight: 1.6,
-                  color: "#475569",
-                }}
-              >
-                {selE.sum}
-              </p>
-            </Section>
-
-            <Section title="Exports">
-              {selE.exp.map(function (ex, i) {
+        <svg
+          width={CW}
+          height={layout.totalH}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
+        >
+          <AnimatePresence>
+            {focal &&
+              litEdges.map((e, i) => {
+                const fromFP = filePos[e.from];
+                const toFP = filePos[e.to];
+                const fromMP = modPos[fileMap[e.from]?.modKey];
+                const toMP = modPos[fileMap[e.to]?.modKey];
+                if (!fromMP || !toMP) return null;
+                const sx = fromFP?.x ?? fromMP.cx,
+                  sy = fromFP?.y ?? fromMP.cy;
+                const ex = toFP?.x ?? toMP.cx,
+                  ey = toFP?.y ?? toMP.cy;
+                const dy = ey - sy;
+                const cp = Math.max(40, Math.abs(dy) * 0.35);
+                const sign = dy >= 0 ? 1 : -1;
+                const col = fileMap[e.from]?.layer.color || "#666";
+                const col2 = fileMap[e.to]?.layer.color || "#666";
+                const d = `M${sx},${sy} C${sx},${sy + sign * cp} ${ex},${ey - sign * cp} ${ex},${ey}`;
                 return (
-                  <div
-                    key={i}
-                    style={{
-                      padding: "4px 8px",
-                      background: "#F8FAFC",
-                      borderRadius: 5,
-                      fontSize: 11.5,
-                      fontFamily: "SF Mono,Menlo,monospace",
-                      color: "#334155",
-                      marginBottom: 3,
-                    }}
-                  >
-                    {ex}
-                  </div>
+                  <g key={`${e.from}-${e.to}`}>
+                    <motion.path
+                      d={d}
+                      fill="none"
+                      stroke={col}
+                      strokeWidth={5}
+                      opacity={0.06}
+                      initial={{ pathLength: 0 }}
+                      animate={{ pathLength: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.6, ease: "easeOut" }}
+                    />
+                    <motion.path
+                      d={d}
+                      fill="none"
+                      stroke={col}
+                      strokeWidth={1.5}
+                      opacity={0.65}
+                      initial={{ pathLength: 0 }}
+                      animate={{ pathLength: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.6, ease: "easeOut" }}
+                    />
+                    <circle cx={sx} cy={sy} r={3} fill={col} opacity={0.8}>
+                      <animate
+                        attributeName="r"
+                        values="2;3.5;2"
+                        dur="1.8s"
+                        repeatCount="indefinite"
+                      />
+                    </circle>
+                    <circle cx={ex} cy={ey} r={3} fill={col2} opacity={0.8}>
+                      <animate
+                        attributeName="r"
+                        values="2;3.5;2"
+                        dur="1.8s"
+                        repeatCount="indefinite"
+                      />
+                    </circle>
+                  </g>
                 );
               })}
-            </Section>
+          </AnimatePresence>
+        </svg>
 
-            <Section title={"Connections (" + selEdges.length + ")"}>
-              {selEdges.map(function (e, i) {
-                var out = e.from === sel;
-                var oId = out ? e.to : e.from;
-                var oN = NM[oId];
-                var st = ETYPE[e.type];
-                return (
+        {layout.layers.map((layer) => (
+          <div key={layer.name}>
+            <div
+              style={{
+                position: "absolute",
+                left: PAD,
+                top: layer.y,
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                fontSize: 9,
+                fontWeight: 700,
+                color: layer.color,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                opacity: 0.5,
+                zIndex: 2,
+              }}
+            >
+              <span>{layer.icon}</span> {layer.name}
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                left: PAD - 8,
+                right: PAD - 8,
+                top: layer.y + L_H,
+                height: layer.h - L_H - L_G,
+                background: `${layer.color}05`,
+                borderRadius: 12,
+                border: `1px solid ${layer.color}08`,
+                zIndex: 1,
+              }}
+            />
+
+            {layer.mods.map((mod) => {
+              const mDim = hasHL && !litMods.has(mod.key);
+              const mLit = hasHL && litMods.has(mod.key);
+              return (
+                <div
+                  key={mod.key}
+                  style={{
+                    position: "absolute",
+                    left: mod.x,
+                    top: mod.y,
+                    width: mod.w,
+                    height: mod.h,
+                    zIndex: 3,
+                  }}
+                >
                   <div
-                    key={i}
-                    onClick={function (ev) {
+                    onClick={(ev) => {
                       ev.stopPropagation();
-                      setSel(oId);
+                      toggle(mod.key);
                     }}
                     style={{
-                      padding: "7px 8px",
-                      borderRadius: 7,
-                      border: "1px solid #F1F5F9",
-                      marginBottom: 3,
+                      width: "100%",
+                      height: "100%",
+                      background: mDim
+                        ? "rgba(255,255,255,0.01)"
+                        : mLit
+                          ? `${layer.color}14`
+                          : `${layer.color}09`,
+                      border: `1px solid ${mLit ? layer.color + "44" : mDim ? "rgba(255,255,255,0.02)" : layer.color + "18"}`,
+                      borderRadius: 10,
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      opacity: mDim ? 0.3 : 1,
+                      boxShadow: mLit ? `0 0 24px ${layer.color}12` : "none",
+                    }}
+                  />
+                  <div
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      toggle(mod.key);
+                    }}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: MOD_H,
                       display: "flex",
                       alignItems: "center",
-                      gap: 7,
+                      gap: 4,
+                      padding: "0 10px",
                       cursor: "pointer",
-                      background: "white",
-                    }}
-                    onMouseEnter={function (ev) {
-                      ev.currentTarget.style.background = "#F8FAFC";
-                      setHov(oId);
-                    }}
-                    onMouseLeave={function (ev) {
-                      ev.currentTarget.style.background = "white";
-                      setHov(null);
+                      opacity: mDim ? 0.35 : 1,
+                      transition: "opacity 0.2s",
                     }}
                   >
+                    {mod.isExp ? (
+                      <ChevronDown size={10} color={layer.color} />
+                    ) : (
+                      <ChevronRight size={10} color={layer.color} />
+                    )}
                     <span
                       style={{
-                        fontSize: 9,
-                        fontWeight: 600,
-                        color: st.color,
-                        background: st.color + "18",
-                        padding: "2px 5px",
-                        borderRadius: 3,
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        color: layer.color,
+                        flex: 1,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {out ? "→ uses" : "← used by"}
+                      {mod.name}
                     </span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11.5, fontWeight: 600 }}>
-                        {oN.name}
-                      </div>
-                      <div style={{ fontSize: 9.5, color: "#94A3B8" }}>
-                        {e.label}
-                      </div>
-                    </div>
                     <span
                       style={{
-                        width: 5,
-                        height: 5,
-                        borderRadius: 1,
-                        background: ROLE[oN.role].color,
-                        flexShrink: 0,
+                        fontSize: 7.5,
+                        color: layer.color,
+                        opacity: 0.6,
+                        background: layer.color + "12",
+                        padding: "1px 5px",
+                        borderRadius: 4,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {mod.fileCount}
+                    </span>
+                  </div>
+                  {mod.isExp &&
+                    mod.files.map((file) => {
+                      const fLit = litFiles.has(file.id);
+                      const fSel = selFile === file.id;
+                      const fDim = hasHL && !litFiles.has(file.id);
+                      return (
+                        <div
+                          key={file.id}
+                          onMouseEnter={() => setHovFile(file.id)}
+                          onMouseLeave={() => setHovFile(null)}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            setSelFile(selFile === file.id ? null : file.id);
+                          }}
+                          style={{
+                            position: "absolute",
+                            left: 4,
+                            top: file.localTop,
+                            width: MOD_W - 8,
+                            height: F_H - 2,
+                            display: "flex",
+                            alignItems: "center",
+                            padding: "0 8px",
+                            fontSize: 9,
+                            fontWeight: 600,
+                            fontFamily: "'SF Mono',Monaco,Consolas,monospace",
+                            borderRadius: 5,
+                            cursor: "pointer",
+                            background: fSel
+                              ? layer.color + "2A"
+                              : fLit
+                                ? layer.color + "1A"
+                                : "rgba(255,255,255,0.025)",
+                            color: fDim
+                              ? "#1E293B"
+                              : fSel || fLit
+                                ? "#F1F5F9"
+                                : layer.color + "BB",
+                            border: `1px solid ${fSel ? layer.color + "55" : fLit ? layer.color + "30" : "transparent"}`,
+                            transition: "all 0.15s",
+                            opacity: fDim ? 0.25 : 1,
+                            zIndex: fSel || fLit ? 12 : 5,
+                          }}
+                        >
+                          {file.label}
+                        </div>
+                      );
+                    })}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        <AnimatePresence>
+          {selFile &&
+            (() => {
+              const f = fileMap[selFile];
+              if (!f) return null;
+              const deps = EDGES.filter((e) => e.from === selFile)
+                .map((e) => fileMap[e.to])
+                .filter(Boolean);
+              const refs = EDGES.filter((e) => e.to === selFile)
+                .map((e) => fileMap[e.from])
+                .filter(Boolean);
+              return (
+                <motion.div
+                  key="detail"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  onClick={(ev) => ev.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 8,
+                    width: 220,
+                    background: "#0F172AEE",
+                    backdropFilter: "blur(16px)",
+                    border: `1px solid ${f.layer.color}30`,
+                    borderRadius: 12,
+                    padding: "14px 16px",
+                    zIndex: 100,
+                    boxShadow: "0 16px 48px rgba(0,0,0,0.6)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: f.layer.color,
                       }}
                     />
+                    <span
+                      style={{ fontWeight: 700, fontSize: 12, color: "white" }}
+                    >
+                      {f.label}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 7,
+                        color: f.layer.color,
+                        fontWeight: 700,
+                        background: f.layer.color + "18",
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        marginLeft: "auto",
+                      }}
+                    >
+                      {f.layer.name}
+                    </span>
                   </div>
-                );
-              })}
-            </Section>
+                  <div
+                    style={{
+                      fontSize: 9,
+                      color: "#64748B",
+                      background: "rgba(255,255,255,0.04)",
+                      padding: "5px 8px",
+                      borderRadius: 6,
+                      marginBottom: 10,
+                      fontFamily: "monospace",
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {f.modKey}
+                  </div>
+                  {deps.length > 0 && (
+                    <div style={{ marginBottom: refs.length > 0 ? 10 : 0 }}>
+                      <div
+                        style={{
+                          fontSize: 8,
+                          fontWeight: 700,
+                          color: "#475569",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.1em",
+                          marginBottom: 5,
+                        }}
+                      >
+                        → Imports ({deps.length})
+                      </div>
+                      <div
+                        style={{ display: "flex", flexWrap: "wrap", gap: 4 }}
+                      >
+                        {deps.map((d) => (
+                          <span
+                            key={d.id}
+                            onClick={() => {
+                              setExpanded((p) => new Set([...p, d.modKey]));
+                              setSelFile(d.id);
+                            }}
+                            style={{
+                              padding: "2px 7px",
+                              borderRadius: 5,
+                              fontSize: 8,
+                              fontWeight: 600,
+                              background: d.layer.color + "15",
+                              color: d.layer.color,
+                              cursor: "pointer",
+                              border: `1px solid ${d.layer.color}15`,
+                            }}
+                          >
+                            {d.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {refs.length > 0 && (
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 8,
+                          fontWeight: 700,
+                          color: "#475569",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.1em",
+                          marginBottom: 5,
+                        }}
+                      >
+                        ← Used by ({refs.length})
+                      </div>
+                      <div
+                        style={{ display: "flex", flexWrap: "wrap", gap: 4 }}
+                      >
+                        {refs.map((d) => (
+                          <span
+                            key={d.id}
+                            onClick={() => {
+                              setExpanded((p) => new Set([...p, d.modKey]));
+                              setSelFile(d.id);
+                            }}
+                            style={{
+                              padding: "2px 7px",
+                              borderRadius: 5,
+                              fontSize: 8,
+                              fontWeight: 600,
+                              background: d.layer.color + "15",
+                              color: d.layer.color,
+                              cursor: "pointer",
+                              border: `1px solid ${d.layer.color}15`,
+                            }}
+                          >
+                            {d.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })()}
+        </AnimatePresence>
+      </div>
 
+      <div
+        style={{
+          maxWidth: CW,
+          margin: "0 auto",
+          padding: "8px 20px 32px",
+          display: "flex",
+          justifyContent: "center",
+          gap: 20,
+          flexWrap: "wrap",
+        }}
+      >
+        {LAYERS.map((l) => (
+          <div
+            key={l.name}
+            style={{ display: "flex", alignItems: "center", gap: 5 }}
+          >
             <div
               style={{
-                padding: 10,
-                borderRadius: 7,
-                background: "#FFFBEB",
-                border: "1px solid #FEF3C7",
-                marginBottom: 12,
+                width: 7,
+                height: 7,
+                borderRadius: 3,
+                background: l.color,
+                opacity: 0.7,
               }}
-            >
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 11.5,
-                  lineHeight: 1.55,
-                  color: "#92400E",
-                }}
-              >
-                {selE.tip}
-              </p>
-            </div>
-
-            <div
-              style={{
-                padding: "7px 10px",
-                borderRadius: 7,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                background: selE.impact.startsWith("High")
-                  ? "#FEF2F2"
-                  : selE.impact.startsWith("Medium")
-                    ? "#FFF7ED"
-                    : "#F0FDF4",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  color: selE.impact.startsWith("High")
-                    ? "#DC2626"
-                    : selE.impact.startsWith("Medium")
-                      ? "#D97706"
-                      : "#16A34A",
-                }}
-              >
-                Impact
-              </span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: selE.impact.startsWith("High")
-                    ? "#991B1B"
-                    : selE.impact.startsWith("Medium")
-                      ? "#92400E"
-                      : "#166534",
-                }}
-              >
-                {selE.impact}
-              </span>
-            </div>
+            />
+            <span style={{ fontSize: 9, color: "#475569", fontWeight: 600 }}>
+              {l.name}
+            </span>
           </div>
-        )}
+        ))}
       </div>
     </div>
   );

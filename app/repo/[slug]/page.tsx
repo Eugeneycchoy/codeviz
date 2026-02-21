@@ -1,41 +1,30 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import type { Node, Edge } from "reactflow";
-import type { NodeData } from "@/components/FileNode";
-import DependencyGraph, { type GraphNodeData, type LayerInfo } from "@/components/DependencyGraph";
-import { GraphHeader, type EdgeFilter } from "@/components/GraphHeader";
-import { GraphLegend } from "@/components/GraphLegend";
-import { SidePanel } from "@/components/SidePanel";
+import { AnimatePresence } from "framer-motion";
 import { Loader2 } from "lucide-react";
-
-const SEARCH_RESULTS_MAX = 10;
+import ArchGraph from "@/components/ArchGraph";
+import type { GraphModule, GraphEdge } from "@/components/ArchGraph";
+import { ArchDetailPanel } from "@/components/ArchDetailPanel";
+import type { FixedLayer } from "@/lib/layers";
 
 export default function RepoGraphPage() {
   const params = useParams();
   const router = useRouter();
   const slug = (params?.slug as string) ?? "";
 
-  const [nodes, setNodes] = useState<Node<GraphNodeData>[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
-  const [layers, setLayers] = useState<LayerInfo[]>([]);
-  const [selectedNode, setSelectedNode] = useState<Node<NodeData> | null>(null);
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [searchTarget, setSearchTarget] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [graphLoading, setGraphLoading] = useState(true);
-  const [graphError, setGraphError] = useState<string | null>(null);
   const [repoName, setRepoName] = useState("");
   const [stackName, setStackName] = useState<string | undefined>(undefined);
-  const [orphanCount, setOrphanCount] = useState(0);
+  const [layers, setLayers] = useState<FixedLayer[]>([]);
+  const [modules, setModules] = useState<GraphModule[]>([]);
+  const [edges, setEdges] = useState<GraphEdge[]>([]);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [graphLoading, setGraphLoading] = useState(true);
+  const [graphError, setGraphError] = useState<string | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explanationLoading, setExplanationLoading] = useState(false);
-  const [edgeFilter, setEdgeFilter] = useState<EdgeFilter>("all");
-
-  const searchContainerRef = useRef<HTMLDivElement>(null);
-  const focusedNodeId = selectedNode?.id ?? null;
 
   useEffect(() => {
     if (!slug) return;
@@ -56,12 +45,11 @@ export default function RepoGraphPage() {
       })
       .then((data) => {
         if (data == null) return;
-        setNodes(data.nodes ?? []);
-        setEdges(data.edges ?? []);
-        setLayers(data.layers ?? []);
         setRepoName(data.repoName ?? slug);
         setStackName(data.stackName ?? undefined);
-        setOrphanCount(data.orphanCount ?? 0);
+        setLayers(data.layers ?? []);
+        setModules(data.modules ?? []);
+        setEdges(data.edges ?? []);
       })
       .catch((err) => {
         setGraphError(
@@ -73,8 +61,9 @@ export default function RepoGraphPage() {
       });
   }, [slug, router]);
 
+  // Fetch AI explanation when a file is selected
   useEffect(() => {
-    if (!selectedNode) {
+    if (!selectedFileId) {
       setExplanation(null);
       return;
     }
@@ -84,7 +73,7 @@ export default function RepoGraphPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({ fileId: selectedNode.id }),
+      body: JSON.stringify({ fileId: selectedFileId }),
     })
       .then((res) => res.json())
       .then((data) => {
@@ -96,66 +85,18 @@ export default function RepoGraphPage() {
       .finally(() => {
         setExplanationLoading(false);
       });
-  }, [selectedNode]);
+  }, [selectedFileId]);
 
-  useEffect(() => {
-    const handleMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (
-        searchContainerRef.current &&
-        target &&
-        !searchContainerRef.current.contains(target)
-      ) {
-        setSearchQuery("");
-      }
-    };
-    document.addEventListener("mousedown", handleMouseDown);
-    return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, []);
-
+  // Escape to deselect
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (document.activeElement instanceof HTMLInputElement) return;
-      setSelectedNode(null);
+      setSelectedFileId(null);
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
-
-  const fileNodes = useMemo(
-    () => nodes.filter((n): n is Node<NodeData> => n.type === "file"),
-    [nodes]
-  );
-
-  const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const q = searchQuery.trim().toLowerCase();
-    return fileNodes
-      .filter((n) => (n.data?.label ?? "").toLowerCase().includes(q))
-      .slice(0, SEARCH_RESULTS_MAX);
-  }, [fileNodes, searchQuery]);
-
-  const closePanel = useCallback(() => {
-    setSelectedNode(null);
-  }, []);
-
-  const handleSearchSelect = useCallback((nodeId: string) => {
-    setSearchQuery("");
-    setSearchTarget(nodeId);
-    setTimeout(() => setSearchTarget(null), 1000);
-  }, []);
-
-  const handleNodeNavigate = useCallback((nodeId: string) => {
-    const target = fileNodes.find((n) => n.id === nodeId);
-    if (target) {
-      setSelectedNode(target);
-      setSearchTarget(nodeId);
-      setTimeout(() => setSearchTarget(null), 1000);
-    }
-  }, [fileNodes]);
-
-  const displayName = repoName || slug || "visualize-code";
 
   if (graphLoading) {
     return (
@@ -186,57 +127,31 @@ export default function RepoGraphPage() {
   }
 
   return (
-    <div className="relative h-[calc(100vh-64px)] w-full overflow-hidden bg-white flex flex-col">
-      <GraphHeader
-        repoName={displayName}
+    <div className="relative h-[calc(100vh-64px)] w-full overflow-auto bg-white">
+      <ArchGraph
+        repoName={repoName}
         stackName={stackName}
-        edgeFilter={edgeFilter}
-        onEdgeFilterChange={setEdgeFilter}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        searchResults={searchResults}
-        onSearchSelect={handleSearchSelect}
-        searchContainerRef={searchContainerRef}
+        layers={layers}
+        modules={modules}
+        edges={edges}
+        selectedFileId={selectedFileId}
+        onFileSelect={setSelectedFileId}
       />
 
-      <div className="flex-1 relative" style={{ marginTop: 45 }}>
-        <DependencyGraph
-          initialNodes={nodes}
-          initialEdges={edges}
-          searchTarget={searchTarget}
-          focusedNodeId={focusedNodeId}
-          hoveredNodeId={hoveredNodeId}
-          onNodeSelect={setSelectedNode}
-          onNodeHover={setHoveredNodeId}
-          orphanCount={orphanCount}
-          edgeFilter={edgeFilter}
-          layers={layers}
-        />
-
-        {/* Side panel */}
-        {selectedNode && (
-          <div
-            className="absolute top-0 right-0 z-50 h-full bg-white shadow-2xl border-l border-slate-200"
-            style={{
-              width: 320,
-              transition: "width 0.25s ease",
-            }}
-          >
-            <SidePanel
-              node={selectedNode}
-              edges={edges}
-              allNodes={fileNodes}
-              explanation={explanation}
-              explanationLoading={explanationLoading}
-              onClose={closePanel}
-              onNodeNavigate={handleNodeNavigate}
-              onNodeHover={setHoveredNodeId}
-            />
-          </div>
+      <AnimatePresence>
+        {selectedFileId && (
+          <ArchDetailPanel
+            fileId={selectedFileId}
+            layers={layers}
+            modules={modules}
+            edges={edges}
+            explanation={explanation}
+            explanationLoading={explanationLoading}
+            onClose={() => setSelectedFileId(null)}
+            onFileSelect={setSelectedFileId}
+          />
         )}
-      </div>
-
-      <GraphLegend />
+      </AnimatePresence>
     </div>
   );
 }

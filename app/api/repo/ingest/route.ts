@@ -12,6 +12,11 @@ import {
   type RepoFile,
   type RepoFileWithLanguage,
 } from "@/lib/repo-ingest";
+import {
+  analyzeCodebase,
+  classifyEdgeTypes,
+  getDefaultAnalysisResult,
+} from "@/lib/codebase-analysis";
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -197,13 +202,17 @@ export async function POST(request: Request) {
       language: detectLanguage(f.path),
     }));
 
+    let analysisResult = await analyzeCodebase(filesWithLanguage);
+    if (!analysisResult) analysisResult = getDefaultAnalysisResult();
+
     const result = await runDbWritePipeline(
       supabaseAdmin,
       session.user.id,
       repoName,
       filesWithLanguage,
       "git_url",
-      gitUrl
+      gitUrl,
+      classifyEdgeTypes
     );
 
     if ("error" in result) {
@@ -216,6 +225,22 @@ export async function POST(request: Request) {
           { status: 503 }
         );
       }
+      return NextResponse.json(
+        { error: "Server error while saving repository" },
+        { status: 500 }
+      );
+    }
+
+    const { error: updateErr } = await supabaseAdmin
+      .from("repositories")
+      .update({
+        layer_config: analysisResult.file_classifications,
+        detected_stack_id: analysisResult.stack_id,
+        analysis_extra_aliases: analysisResult.extra_aliases,
+      })
+      .eq("id", result.repoId);
+    if (updateErr) {
+      await supabaseAdmin.from("repositories").delete().eq("id", result.repoId);
       return NextResponse.json(
         { error: "Server error while saving repository" },
         { status: 500 }
@@ -333,13 +358,17 @@ export async function POST(request: Request) {
     language: detectLanguage(f.path),
   }));
 
+  let analysisResult = await analyzeCodebase(filesWithLanguage);
+  if (!analysisResult) analysisResult = getDefaultAnalysisResult();
+
   const result = await runDbWritePipeline(
     supabaseAdmin,
     session.user.id,
     repoName,
     filesWithLanguage,
     "upload",
-    null
+    null,
+    classifyEdgeTypes
   );
 
   if ("error" in result) {
@@ -358,5 +387,20 @@ export async function POST(request: Request) {
     );
   }
 
+  const { error: updateErr } = await supabaseAdmin
+    .from("repositories")
+    .update({
+      layer_config: analysisResult.file_classifications,
+      detected_stack_id: analysisResult.stack_id,
+      analysis_extra_aliases: analysisResult.extra_aliases,
+    })
+    .eq("id", result.repoId);
+  if (updateErr) {
+    await supabaseAdmin.from("repositories").delete().eq("id", result.repoId);
+    return NextResponse.json(
+      { error: "Server error while saving repository" },
+      { status: 500 }
+    );
+  }
   return NextResponse.json({ repoId: result.repoId, slug: result.slug }, { status: 200 });
 }

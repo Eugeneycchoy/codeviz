@@ -5,6 +5,7 @@
 import path from "path";
 import ignore, { type Ignore } from "ignore";
 import { parseImports } from "./parser";
+import { detectStack } from "./stack-profiles";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const SKIP_PATH_CONTAINS = ["node_modules/", ".git/", "dist/", "build/"];
@@ -56,9 +57,18 @@ export function detectLanguage(filePath: string): string | null {
   if ([".ts", ".tsx", ".js", ".jsx"].includes(ext)) return "typescript";
   if (ext === ".py") return "python";
   if (ext === ".css") return "css";
+  if ([".scss", ".sass"].includes(ext)) return "scss";
   if ([".html", ".htm"].includes(ext)) return "html";
+  if (ext === ".vue") return "vue";
   if (ext === ".json") return "json";
   if (ext === ".md") return "markdown";
+  if (ext === ".go") return "go";
+  if (ext === ".rb") return "ruby";
+  if (ext === ".java") return "java";
+  if (ext === ".rs") return "rust";
+  if (ext === ".php") return "php";
+  if ([".yaml", ".yml"].includes(ext)) return "yaml";
+  if (ext === ".toml") return "toml";
   return null;
 }
 
@@ -129,6 +139,15 @@ function resolveImportToExactPath(currentFilePath: string, importPath: string): 
 const INSERT_CHUNK_SIZE = 3;
 const INSERT_MAX_RETRIES = 2;
 const INSERT_RETRY_DELAY_MS = 1500;
+
+function tryParseJson(content: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(content);
+    return typeof parsed === "object" && parsed !== null ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 type AdminClient = SupabaseClient;
 
@@ -245,17 +264,19 @@ export async function runDbWritePipeline(
     pathToFileId.set(row.path, row.id);
   }
 
-  // @/ root = directory containing tsconfig.json (empty if at ZIP root; "myrepo/" if myrepo/tsconfig.json).
-  let aliasRoot = "";
-  for (const row of insertedFiles) {
-    if (row.path.endsWith("tsconfig.json")) {
-      const dir = path.posix.dirname(row.path);
-      aliasRoot = dir === "." ? "" : `${dir}/`;
-      break;
-    }
+  // Detect stack profile for alias resolution and extension suffixes
+  const packageJsonFile = files.find((f) => f.path.endsWith("package.json"));
+  const parsedPkg = packageJsonFile ? tryParseJson(packageJsonFile.content) : null;
+  const profile = detectStack(insertedFiles, parsedPkg);
+
+  // Build alias roots from profile
+  const aliasRoots = new Map<string, string>();
+  for (const alias of profile.aliases ?? []) {
+    const root = alias.resolveRoot(insertedFiles);
+    aliasRoots.set(alias.prefix, root);
   }
 
-  const extensionSuffixes = [".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx", "/index.js", "/index.jsx"];
+  const extensionSuffixes = profile.extensionSuffixes;
   const edgeKey = (a: string, b: string) => `${a}\t${b}`;
   const seenEdges = new Set<string>();
   const edges: { repo_id: string; source_file_id: string; target_file_id: string }[] = [];
@@ -264,14 +285,32 @@ export async function runDbWritePipeline(
     if (!sourceId) continue;
     const imports = parseImports(f.path, f.content);
     for (const imp of imports) {
-      let resolvedPath: string;
-      if (imp.startsWith("@/")) {
-        resolvedPath = aliasRoot + imp.slice(2);
-      } else if (imp.startsWith("./") || imp.startsWith("../")) {
-        resolvedPath = resolveImportToExactPath(f.path, imp);
-      } else {
-        continue;
+      let resolvedPath: string | null = null;
+
+      // Check alias prefixes first
+      let aliasMatched = false;
+      for (const entry of Array.from(aliasRoots.entries())) {
+        const [prefix, root] = entry;
+        if (imp.startsWith(prefix)) {
+          resolvedPath = root + imp.slice(prefix.length);
+          aliasMatched = true;
+          break;
+        }
       }
+
+      if (!aliasMatched) {
+        if (imp.startsWith("./") || imp.startsWith("../")) {
+          // Relative path
+          resolvedPath = resolveImportToExactPath(f.path, imp);
+        } else {
+          // Bare/absolute import (e.g. Python "myapp/models", HTML "scripts/app.js")
+          // Try resolving against the file map directly
+          resolvedPath = imp;
+        }
+      }
+
+      if (!resolvedPath) continue;
+
       let targetId = pathToFileId.get(resolvedPath) ?? null;
       if (targetId === null) {
         for (const suffix of extensionSuffixes) {

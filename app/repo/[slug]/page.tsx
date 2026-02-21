@@ -1,25 +1,11 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import {
-  ReactFlow,
-  Background,
-  BackgroundVariant,
-  Controls,
-  Panel,
-  useNodesState,
-  useEdgesState,
-  addEdge,
-  type Connection,
-  type Edge,
-  type Node,
-  type NodeProps,
-  MarkerType,
-} from "reactflow";
-// Required for React Flow canvas, handles, and controls
-import "reactflow/dist/style.css";
+import type { Node, Edge } from "reactflow";
+import type { NodeData } from "@/components/FileNode";
+import DependencyGraph, { type GraphNodeData } from "@/components/DependencyGraph";
 import {
   ChevronRight,
   Search,
@@ -30,62 +16,27 @@ import {
   Loader2,
 } from "lucide-react";
 
-type NodeData = { label: string; path: string };
-
-function CustomFileNode({ data, selected }: NodeProps<NodeData>) {
-  return (
-    <div
-      className={
-        selected
-          ? "px-5 py-3 rounded-2xl border-2 transition-all duration-300 shadow-xl shadow-slate-200/50 min-w-[180px] border-blue-500 bg-white scale-[1.05] ring-8 ring-blue-50"
-          : "px-5 py-3 rounded-2xl border-2 transition-all duration-300 shadow-xl shadow-slate-200/50 min-w-[180px] border-slate-100 bg-white hover:border-blue-300 hover:shadow-2xl hover:shadow-slate-300/50"
-      }
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className={
-            selected
-              ? "p-2 rounded-xl transition-colors duration-300 bg-blue-600 text-white"
-              : "p-2 rounded-xl transition-colors duration-300 bg-slate-50 text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500"
-          }
-        >
-          <FileCode className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <p
-            className={
-              selected
-                ? "text-sm font-bold truncate leading-tight transition-colors duration-300 text-blue-700"
-                : "text-sm font-bold truncate leading-tight transition-colors duration-300 text-slate-800"
-            }
-          >
-            {data.label}
-          </p>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">
-            {data.path.split("/").slice(0, -1).join("/") || "root"}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const nodeTypes = {
-  file: CustomFileNode,
-};
+const SEARCH_RESULTS_MAX = 10;
 
 export default function RepoGraphPage() {
   const params = useParams();
   const router = useRouter();
   const slug = (params?.slug as string) ?? "";
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  const [nodes, setNodes] = useState<Node<GraphNodeData>[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
   const [selectedNode, setSelectedNode] = useState<Node<NodeData> | null>(null);
+  const [searchTarget, setSearchTarget] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const [graphLoading, setGraphLoading] = useState(true);
   const [graphError, setGraphError] = useState<string | null>(null);
-  const [repoName, setRepoName] = useState<string>("");
+  const [repoName, setRepoName] = useState("");
+  const [orphanCount, setOrphanCount] = useState(0);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explanationLoading, setExplanationLoading] = useState(false);
+
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const focusedNodeId = selectedNode?.id ?? null;
 
   useEffect(() => {
     if (!slug) return;
@@ -98,29 +49,28 @@ export default function RepoGraphPage() {
             router.push("/dashboard");
             return null;
           }
-          throw new Error(res.status === 401 ? "Unauthorized" : "Failed to load graph");
+          throw new Error(
+            res.status === 401 ? "Unauthorized" : "Failed to load graph"
+          );
         }
         return res.json();
       })
       .then((data) => {
         if (data == null) return;
         setNodes(data.nodes ?? []);
-        setEdges(
-          (data.edges ?? []).map((e: Edge) => ({
-            ...e,
-            markerEnd: e.markerEnd ?? { type: MarkerType.ArrowClosed, color: "#3b82f6" },
-            style: e.style ?? { stroke: "#3b82f6", strokeWidth: 2 },
-          }))
-        );
+        setEdges(data.edges ?? []);
         setRepoName(data.repoName ?? slug);
+        setOrphanCount(data.orphanCount ?? 0);
       })
       .catch((err) => {
-        setGraphError(err instanceof Error ? err.message : "Failed to load graph");
+        setGraphError(
+          err instanceof Error ? err.message : "Failed to load graph"
+        );
       })
       .finally(() => {
         setGraphLoading(false);
       });
-  }, [slug, router, setNodes, setEdges]);
+  }, [slug, router]);
 
   useEffect(() => {
     if (!selectedNode) {
@@ -147,17 +97,29 @@ export default function RepoGraphPage() {
       });
   }, [selectedNode]);
 
-  const onConnect = useCallback(
-    (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
-    [setEdges]
-  );
-
-  const onNodeClick = useCallback((_event: React.MouseEvent, node: Node<NodeData>) => {
-    setSelectedNode(node);
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        searchContainerRef.current &&
+        target &&
+        !searchContainerRef.current.contains(target)
+      ) {
+        setSearchQuery("");
+      }
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
   }, []);
 
-  const closePanel = useCallback(() => {
-    setSelectedNode(null);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (document.activeElement instanceof HTMLInputElement) return;
+      setSelectedNode(null);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   const dependencyNodes = useMemo(() => {
@@ -168,6 +130,34 @@ export default function RepoGraphPage() {
       .filter((n): n is Node<NodeData> => n != null);
   }, [selectedNode, edges, nodes]);
 
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.trim().toLowerCase();
+    return nodes
+      .filter(
+        (n) =>
+          n.type === "file" &&
+          (n.data?.label ?? "").toLowerCase().includes(q)
+      )
+      .slice(0, SEARCH_RESULTS_MAX);
+  }, [nodes, searchQuery]);
+
+  const closePanel = useCallback(() => {
+    setSelectedNode(null);
+  }, []);
+
+  const handleSearchSelect = useCallback((nodeId: string) => {
+    setSearchQuery("");
+    setSearchTarget(nodeId);
+    setTimeout(() => setSearchTarget(null), 1000);
+  }, []);
+
+  const handleDependencyClick = useCallback((dep: Node<NodeData>) => {
+    setSelectedNode(dep);
+    setSearchTarget(dep.id);
+    setTimeout(() => setSearchTarget(null), 1000);
+  }, []);
+
   const displayName = repoName || slug || "visualize-code";
 
   if (graphLoading) {
@@ -175,7 +165,9 @@ export default function RepoGraphPage() {
       <div className="flex h-[calc(100vh-64px)] w-full items-center justify-center bg-white">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
-          <p className="text-sm font-medium text-slate-600">Loading dependency graph...</p>
+          <p className="text-sm font-medium text-slate-600">
+            Loading dependency graph...
+          </p>
         </div>
       </div>
     );
@@ -211,17 +203,38 @@ export default function RepoGraphPage() {
             <span className="text-sm font-bold text-blue-700">{displayName}</span>
           </div>
           <span className="text-slate-200">/</span>
-          <span className="text-sm font-semibold text-slate-500">Dependency Graph</span>
+          <span className="text-sm font-semibold text-slate-500">
+            Dependency Graph
+          </span>
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="relative">
+          <div ref={searchContainerRef} className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
             <input
               type="text"
               placeholder="Search files..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9 pl-9 pr-4 rounded-xl border border-slate-100 bg-white/80 text-xs font-medium focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 outline-none transition-all w-64"
             />
+            {searchQuery.trim() && searchResults.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 py-1 rounded-xl border border-slate-100 bg-white shadow-xl z-50 max-h-60 overflow-auto">
+                {searchResults.map((node) => (
+                  <button
+                    key={node.id}
+                    type="button"
+                    onClick={() => handleSearchSelect(node.id)}
+                    className="w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <FileCode className="h-4 w-4 text-slate-400 shrink-0" />
+                    <span className="truncate">
+                      {node.data?.label ?? node.id}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -232,32 +245,14 @@ export default function RepoGraphPage() {
         </div>
       </div>
 
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onNodeClick={onNodeClick}
-        nodeTypes={nodeTypes}
-        fitView
-        className="bg-slate-50/30"
-      >
-        <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="#e2e8f0" />
-        <Controls
-          className="bg-white border-slate-100 shadow-xl rounded-2xl overflow-hidden [&_button]:h-10 [&_button]:w-10 [&_button]:border-slate-100 [&_button]:hover:bg-slate-50 [&_button]:transition-colors"
-          showInteractive={false}
-        />
-        <Panel position="bottom-center" className="mb-6">
-          <div className="px-5 py-3 rounded-2xl bg-slate-900/90 backdrop-blur-md text-white/90 text-[11px] font-bold tracking-widest uppercase flex items-center gap-4 shadow-2xl">
-            <span>Scroll to zoom</span>
-            <div className="w-px h-3 bg-white/20" />
-            <span>Drag to pan</span>
-            <div className="w-px h-3 bg-white/20" />
-            <span>Click node to explain</span>
-          </div>
-        </Panel>
-      </ReactFlow>
+      <DependencyGraph
+        initialNodes={nodes}
+        initialEdges={edges}
+        searchTarget={searchTarget}
+        focusedNodeId={focusedNodeId}
+        onNodeSelect={setSelectedNode}
+        orphanCount={orphanCount}
+      />
 
       {selectedNode && (
         <>
@@ -269,14 +264,14 @@ export default function RepoGraphPage() {
             className="absolute inset-0 z-40 bg-slate-900/10 backdrop-blur-[2px] md:hidden"
             aria-label="Close panel"
           />
-          <div
-            className="absolute top-0 right-0 z-50 h-full w-full max-w-sm md:max-w-md bg-white shadow-2xl border-l border-slate-100 flex flex-col"
-          >
+          <div className="absolute top-0 right-0 z-50 h-full w-full max-w-sm md:max-w-md bg-white shadow-2xl border-l border-slate-100 flex flex-col">
             <div className="p-8 border-b border-slate-100 flex items-center justify-between">
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-blue-600">
                   <FileCode className="h-5 w-5" />
-                  <span className="text-sm font-bold tracking-widest uppercase">File details</span>
+                  <span className="text-sm font-bold tracking-widest uppercase">
+                    File details
+                  </span>
                 </div>
                 <h2 className="text-xl font-extrabold text-slate-900 truncate">
                   {selectedNode.data?.label as string}
@@ -293,7 +288,9 @@ export default function RepoGraphPage() {
 
             <div className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto p-8 space-y-10">
               <section className="space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">Path</h3>
+                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                  Path
+                </h3>
                 <div className="px-4 py-3 rounded-2xl bg-slate-50 border border-slate-100 font-mono text-sm text-slate-600">
                   {selectedNode.data?.path as string}
                 </div>
@@ -304,23 +301,29 @@ export default function RepoGraphPage() {
                   <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
                     AI Explanation
                   </h3>
-                  {!explanationLoading && explanation != null && explanation !== "No explanation available." && (
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-[10px] font-bold text-blue-600 uppercase tracking-wider">
-                      <div className="h-1 w-1 rounded-full bg-blue-600" />
-                      Cached
-                    </div>
-                  )}
-                  {!explanationLoading && explanation !== null && explanation === "No explanation available." && (
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Not generated
-                    </span>
-                  )}
+                  {!explanationLoading &&
+                    explanation != null &&
+                    explanation !== "No explanation available." && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-[10px] font-bold text-blue-600 uppercase tracking-wider">
+                        <div className="h-1 w-1 rounded-full bg-blue-600" />
+                        Cached
+                      </div>
+                    )}
+                  {!explanationLoading &&
+                    explanation !== null &&
+                    explanation === "No explanation available." && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Not generated
+                      </span>
+                    )}
                 </div>
                 <div className="prose prose-slate min-w-0 w-full max-w-full">
                   {explanationLoading ? (
                     <div className="flex items-center gap-2 text-slate-500">
                       <Loader2 className="h-5 w-5 animate-spin" />
-                      <span className="text-sm font-medium">Loading explanation...</span>
+                      <span className="text-sm font-medium">
+                        Loading explanation...
+                      </span>
                     </div>
                   ) : (
                     <p className="w-full max-w-full min-w-0 text-lg text-slate-600 leading-relaxed font-medium break-words">
@@ -336,13 +339,15 @@ export default function RepoGraphPage() {
                 </h3>
                 <div className="space-y-2">
                   {dependencyNodes.length === 0 ? (
-                    <p className="text-sm text-slate-500">No direct dependencies.</p>
+                    <p className="text-sm text-slate-500">
+                      No direct dependencies.
+                    </p>
                   ) : (
                     dependencyNodes.map((dep) => (
                       <button
                         key={dep.id}
                         type="button"
-                        onClick={() => setSelectedNode(dep)}
+                        onClick={() => handleDependencyClick(dep)}
                         className="flex w-full items-center justify-between p-4 rounded-2xl border border-slate-50 hover:border-blue-100 hover:bg-blue-50/30 transition-all cursor-pointer group text-left"
                       >
                         <div className="flex items-center gap-3 min-w-0">

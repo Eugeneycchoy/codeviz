@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
+import path from "path";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 import JSZip from "jszip";
@@ -22,6 +23,10 @@ export const maxDuration = 60;
 export const runtime = "nodejs";
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+/** Per-file uncompressed size limit (aligns with repo-ingest filter). */
+const MAX_UNCOMPRESSED_FILE_BYTES = 500 * 1024; // 500 KB
+/** Total uncompressed size limit to mitigate zip bombs. */
+const MAX_TOTAL_UNCOMPRESSED_BYTES = 150 * 1024 * 1024; // 150 MB
 
 /** Directory names to skip during git repo traversal (pruned before reading any file contents). */
 const GIT_TRAVERSAL_SKIP_DIRS = new Set([".git", "node_modules", "dist", "build"]);
@@ -95,7 +100,22 @@ export async function POST(request: Request) {
       );
     }
 
-    const urlObj = new URL(gitUrl);
+    let urlObj: URL;
+    try {
+      urlObj = new URL(gitUrl);
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid git URL" },
+        { status: 400 }
+      );
+    }
+    const ALLOWED_GIT_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org"]);
+    if (!ALLOWED_GIT_HOSTS.has(urlObj.hostname.toLowerCase())) {
+      return NextResponse.json(
+        { error: "Invalid git URL" },
+        { status: 400 }
+      );
+    }
     const pathname = urlObj.pathname.replace(/\/$/, "");
     const lastSegment = pathname.split("/").pop() ?? "";
     const repoName = lastSegment.toLowerCase().endsWith(".git")
@@ -282,9 +302,17 @@ export async function POST(request: Request) {
   }
 
   const rawName = file.name;
-  const repoName = rawName.toLowerCase().endsWith(".zip")
-    ? rawName.slice(0, -4)
-    : rawName;
+  const baseName = path.basename(rawName);
+  const nameWithoutExt = baseName.toLowerCase().endsWith(".zip")
+    ? baseName.slice(0, -4)
+    : baseName;
+  const repoName = nameWithoutExt.replace(/[/\\\x00-\x1f\x7f]/g, "").trim();
+  if (!repoName) {
+    return NextResponse.json(
+      { error: "Invalid or unsupported file name for repository" },
+      { status: 400 }
+    );
+  }
 
   if (file.size > MAX_FILE_SIZE_BYTES) {
     return NextResponse.json(
@@ -332,8 +360,33 @@ export async function POST(request: Request) {
   }
 
   const zip = await JSZip.loadAsync(buffer);
+  type EntryWithSize = JSZip.JSZipObject & { _data?: { uncompressedSize?: number } };
+  const entries = Object.entries(zip.files) as [string, EntryWithSize][];
+  let totalUncompressedBytes = 0;
+  for (const [, entry] of entries) {
+    if (entry.dir) continue;
+    const uncompressedSize = entry._data?.uncompressedSize;
+    if (typeof uncompressedSize !== "number" || uncompressedSize < 0) {
+      return NextResponse.json(
+        { error: "Invalid or unsupported ZIP (missing size metadata)" },
+        { status: 400 }
+      );
+    }
+    if (uncompressedSize > MAX_UNCOMPRESSED_FILE_BYTES) {
+      return NextResponse.json(
+        { error: "ZIP entry exceeds 500 KB per-file limit" },
+        { status: 400 }
+      );
+    }
+    totalUncompressedBytes += uncompressedSize;
+    if (totalUncompressedBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
+      return NextResponse.json(
+        { error: "ZIP total uncompressed size exceeds 150 MB limit" },
+        { status: 400 }
+      );
+    }
+  }
   const extracted: RepoFile[] = [];
-  const entries = Object.entries(zip.files);
   for (const [, entry] of entries) {
     if (entry.dir) continue;
     const content = await entry.async("string");

@@ -43,7 +43,7 @@ export function getDefaultAnalysisResult(): AnalysisResult {
 }
 
 const POE_BASE_URL = "https://api.poe.com/v1";
-const POE_MODEL = "gemini-2.5-pro";
+const POE_MODEL = "claude-sonnet-4";
 const MAX_TOKENS = 8192;
 
 const SYSTEM_PROMPT = `You are a codebase analyst. Given a list of file paths and their contents (or path-only for large codebases), you must return a single JSON object with no markdown or extra text.

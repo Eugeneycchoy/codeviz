@@ -17,11 +17,13 @@ function pathnameFromUrl(url: string): string | null {
   const trimmed = url.trim();
   if (trimmed.startsWith("/")) {
     const pathOnly = trimmed.split("?")[0].split("#")[0];
-    return pathOnly || "/";
+    const normalized = pathOnly.replace(/\/$/, "") || "/";
+    return normalized;
   }
   try {
     const parsed = new URL(trimmed);
-    return parsed.pathname || "/";
+    const normalized = (parsed.pathname || "/").replace(/\/$/, "") || "/";
+    return normalized;
   } catch {
     return null;
   }

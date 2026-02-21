@@ -3,9 +3,9 @@ import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
 
 const POE_BASE_URL = "https://api.poe.com/v1";
-const POE_MODEL = "gemini-2.5-pro";
+const POE_MODEL = "claude-sonnet-4";
 const MAX_PROMPT_CONTENT_CHARS = 12_000;
-const MAX_TOKENS = 500;
+const MAX_TOKENS = 1000;
 
 /**
  * POST /api/explain
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     content.length > MAX_PROMPT_CONTENT_CHARS
       ? content.slice(0, MAX_PROMPT_CONTENT_CHARS) + "\n\n[Truncated for length.]"
       : content;
-  const prompt = `Explain what this code file does in 2–4 clear sentences for a developer. Be concise.\n\nFile: ${path}\n\nCode:\n${contentSlice}`;
+  const prompt = `Explain what this code file does in 2–4 sentences. Be concise and precise. Use beginner-friendly language: simple words, avoid unnecessary jargon, and briefly explain any technical terms so a newcomer can understand.\n\nFile: ${path}\n\nCode:\n${contentSlice}`;
 
   let generated: string;
   try {

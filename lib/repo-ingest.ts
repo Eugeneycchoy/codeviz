@@ -245,6 +245,17 @@ export async function runDbWritePipeline(
     pathToFileId.set(row.path, row.id);
   }
 
+  // @/ root = directory containing tsconfig.json (empty if at ZIP root; "myrepo/" if myrepo/tsconfig.json).
+  let aliasRoot = "";
+  for (const row of insertedFiles) {
+    if (row.path.endsWith("tsconfig.json")) {
+      const dir = path.posix.dirname(row.path);
+      aliasRoot = dir === "." ? "" : `${dir}/`;
+      break;
+    }
+  }
+
+  const extensionSuffixes = [".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx", "/index.js", "/index.jsx"];
   const edgeKey = (a: string, b: string) => `${a}\t${b}`;
   const seenEdges = new Set<string>();
   const edges: { repo_id: string; source_file_id: string; target_file_id: string }[] = [];
@@ -253,8 +264,25 @@ export async function runDbWritePipeline(
     if (!sourceId) continue;
     const imports = parseImports(f.path, f.content);
     for (const imp of imports) {
-      const resolvedPath = resolveImportToExactPath(f.path, imp);
-      const targetId = pathToFileId.get(resolvedPath) ?? null;
+      let resolvedPath: string;
+      if (imp.startsWith("@/")) {
+        resolvedPath = aliasRoot + imp.slice(2);
+      } else if (imp.startsWith("./") || imp.startsWith("../")) {
+        resolvedPath = resolveImportToExactPath(f.path, imp);
+      } else {
+        continue;
+      }
+      let targetId = pathToFileId.get(resolvedPath) ?? null;
+      if (targetId === null) {
+        for (const suffix of extensionSuffixes) {
+          const candidate = resolvedPath + suffix;
+          const id = pathToFileId.get(candidate);
+          if (id != null) {
+            targetId = id;
+            break;
+          }
+        }
+      }
       if (targetId && targetId !== sourceId) {
         const key = edgeKey(sourceId, targetId);
         if (seenEdges.has(key)) continue;

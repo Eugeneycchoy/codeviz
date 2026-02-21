@@ -7,12 +7,12 @@
 const JS_TS_EXTENSIONS = /\.(tsx?|jsx?)$/i;
 const PY_EXTENSION = /\.py$/i;
 
-/** Captures relative path (group 1) in import/export from 'path' or "path". */
-const ES_STATIC_OR_REEXPORT = /(?:import|export)\s+[\s\S]*?from\s+['"](\.\.?\/[^'"]*)['"]/g;
-/** Captures relative path (group 1) in import('path'). */
-const DYNAMIC_IMPORT = /import\s*\(\s*['"](\.\.?\/[^'"]*)['"]\s*\)/g;
-/** Captures relative path (group 1) in require('path'). */
-const COMMONJS_REQUIRE = /require\s*\(\s*['"](\.\.?\/[^'"]*)['"]\s*\)/g;
+/** Captures relative or @/ path (group 1) in import/export from 'path' or "path". */
+const ES_STATIC_OR_REEXPORT = /(?:import|export)\s+[\s\S]*?from\s+['"](\.\.?\/[^'"]*|@\/[^'"]*)['"]/g;
+/** Captures relative or @/ path (group 1) in import('path'). */
+const DYNAMIC_IMPORT = /import\s*\(\s*['"](\.\.?\/[^'"]*|@\/[^'"]*)['"]\s*\)/g;
+/** Captures relative or @/ path (group 1) in require('path'). */
+const COMMONJS_REQUIRE = /require\s*\(\s*['"](\.\.?\/[^'"]*|@\/[^'"]*)['"]\s*\)/g;
 
 /** Python: from .module or ..module or . import / .. import. Group 1 = dots, group 2 = module name. */
 const PY_FROM_RELATIVE = /from\s+(\.\.?)\s*(\w*)\s+import/g;

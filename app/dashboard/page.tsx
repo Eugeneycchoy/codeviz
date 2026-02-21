@@ -49,7 +49,19 @@ function formatLastViewed(iso: string | null): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
 }
 
-function RepoCard({ repo, onClick }: { repo: Repo; onClick: () => void }) {
+function RepoCard({
+  repo,
+  onClick,
+  onDelete,
+  isDeleting,
+  deleteError,
+}: {
+  repo: Repo;
+  onClick: () => void;
+  onDelete?: () => void;
+  isDeleting?: boolean;
+  deleteError?: string | null;
+}) {
   return (
     <div
       onClick={onClick}
@@ -63,12 +75,23 @@ function RepoCard({ repo, onClick }: { repo: Repo; onClick: () => void }) {
           type="button"
           onClick={(e) => {
             e.stopPropagation();
+            onDelete?.();
           }}
-          className="p-2.5 rounded-xl bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 transition-colors"
+          disabled={isDeleting}
+          className="p-2.5 rounded-xl bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <Trash2 className="h-4 w-4" />
+          {isDeleting ? (
+            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-red-400 border-t-transparent" />
+          ) : (
+            <Trash2 className="h-4 w-4" />
+          )}
         </button>
       </div>
+      {deleteError && (
+        <p className="absolute top-14 right-4 left-4 text-xs font-medium text-red-600 bg-red-50 rounded-lg px-3 py-2 border border-red-100">
+          {deleteError}
+        </p>
+      )}
 
       <div className="flex items-center gap-4 mb-8">
         <div
@@ -119,6 +142,29 @@ export default function DashboardPage() {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingSlugs, setDeletingSlugs] = useState<Record<string, boolean>>({});
+  const [deleteErrorBySlug, setDeleteErrorBySlug] = useState<Record<string, string>>({});
+
+  const handleDelete = useCallback(async (repo: Repo) => {
+    const { slug } = repo;
+    setDeletingSlugs((prev) => ({ ...prev, [slug]: true }));
+    setDeleteErrorBySlug((prev) => ({ ...prev, [slug]: "" }));
+    try {
+      const res = await fetch(`/api/repo/${slug}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const msg =
+          typeof data?.error === "string" ? data.error : "Failed to delete repository";
+        setDeleteErrorBySlug((prev) => ({ ...prev, [slug]: msg }));
+        return;
+      }
+      setRepos((prev) => prev.filter((r) => r.slug !== slug));
+    } catch {
+      setDeleteErrorBySlug((prev) => ({ ...prev, [slug]: "Failed to delete repository" }));
+    } finally {
+      setDeletingSlugs((prev) => ({ ...prev, [slug]: false }));
+    }
+  }, []);
 
   const fetchRepos = useCallback(async () => {
     setError(null);
@@ -212,6 +258,9 @@ export default function DashboardPage() {
               key={repo.id}
               repo={repo}
               onClick={() => router.push(`/repo/${repo.slug}`)}
+              onDelete={() => handleDelete(repo)}
+              isDeleting={deletingSlugs[repo.slug]}
+              deleteError={deleteErrorBySlug[repo.slug] || null}
             />
           ))}
         </div>

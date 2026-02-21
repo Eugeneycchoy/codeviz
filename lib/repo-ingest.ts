@@ -163,10 +163,16 @@ export function slugFromName(name: string): string {
   return slug.length > 0 ? slug : "repo";
 }
 
+/** Optional AI classifier: given path pairs, returns edge types in same order or null on failure. */
+export type ClassifyEdgeTypesFn = (
+  pairs: { sourcePath: string; targetPath: string }[]
+) => Promise<("composition" | "data" | "utility")[] | null>;
+
 /**
  * Runs the full DB write pipeline: insert repo, batch-insert files, parse imports, insert edges, update file_count.
  * On any failure after repo is created, deletes the repo and returns { error: 'db' }.
  * Returns { error: 'db', schemaMissing: true } when the table is missing (PGRST205) so the API can surface an actionable message.
+ * If classifyEdgeTypes is provided and returns types, edges are stored with edge_type; otherwise graph route uses path-based inference.
  * Shared with T4 for git URL path.
  */
 export async function runDbWritePipeline(
@@ -175,7 +181,8 @@ export async function runDbWritePipeline(
   repoName: string,
   files: RepoFileWithLanguage[],
   sourceType: "upload" | "git_url" = "upload",
-  sourceUrl: string | null = null
+  sourceUrl: string | null = null,
+  classifyEdgeTypes?: ClassifyEdgeTypesFn
 ): Promise<{ repoId: string; slug: string } | { error: "db"; schemaMissing?: true }> {
   const baseSlug = slugFromName(repoName);
   let candidateSlug = baseSlug;
@@ -280,6 +287,7 @@ export async function runDbWritePipeline(
   const edgeKey = (a: string, b: string) => `${a}\t${b}`;
   const seenEdges = new Set<string>();
   const edges: { repo_id: string; source_file_id: string; target_file_id: string }[] = [];
+  const pathPairs: { sourcePath: string; targetPath: string }[] = [];
   for (const f of files) {
     const sourceId = pathToFileId.get(f.path);
     if (!sourceId) continue;
@@ -331,13 +339,25 @@ export async function runDbWritePipeline(
           source_file_id: sourceId,
           target_file_id: targetId,
         });
+        pathPairs.push({ sourcePath: f.path, targetPath: resolvedPath });
       }
     }
   }
 
+  let edgeTypes: ("composition" | "data" | "utility")[] | null = null;
+  if (edges.length > 0 && classifyEdgeTypes) {
+    const types = await classifyEdgeTypes(pathPairs);
+    if (types !== null && types.length === edges.length) {
+      edgeTypes = types;
+    }
+  }
+
   if (edges.length > 0) {
-    for (let i = 0; i < edges.length; i += INSERT_CHUNK_SIZE) {
-      const chunk = edges.slice(i, i + INSERT_CHUNK_SIZE);
+    const rows = edgeTypes
+      ? edges.map((e, i) => ({ ...e, edge_type: edgeTypes![i] }))
+      : edges;
+    for (let i = 0; i < rows.length; i += INSERT_CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + INSERT_CHUNK_SIZE);
       const { error } = await admin.from("graph_edges").insert(chunk);
       if (error) {
         await cleanup();

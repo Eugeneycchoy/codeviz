@@ -19,8 +19,11 @@ function classifyWithRules(
 ): { layerIndex: number; moduleName: string } {
   const p = filePath.replace(/\\/g, "/");
   for (const rule of rules) {
-    if (rule.match.is_catchall) continue;
-    const { path_prefixes, path_contains, path_suffixes } = rule.match;
+    if (!rule.match) continue;
+    if (rule.match?.is_catchall) continue;
+    const path_prefixes = rule.match?.path_prefixes ?? [];
+    const path_contains = rule.match?.path_contains ?? [];
+    const path_suffixes = rule.match?.path_suffixes ?? [];
     if (path_prefixes.length === 0 && path_contains.length === 0 && path_suffixes.length === 0) continue;
     const prefixMatch = path_prefixes.length === 0 || path_prefixes.some((pfx) => p.startsWith(pfx));
     const containsMatch = path_contains.length === 0 || path_contains.some((sub) => p.includes(sub));
@@ -30,7 +33,7 @@ function classifyWithRules(
     }
   }
   // Fall through to catch-all
-  const catchAll = rules.find((r) => r.match.is_catchall);
+  const catchAll = rules.find((r) => r.match?.is_catchall);
   if (catchAll) {
     return { layerIndex: catchAll.layer_index, moduleName: catchAll.module_name };
   }
@@ -82,13 +85,18 @@ export async function GET(
   const repoId = repo.id as string;
   const rawConfig = repo.layer_config as FileClassificationRule[] | null;
 
-  // Validate that layer_config looks like the new format (has layer_index + module_name)
-  // and contains at least one non-catch-all rule (otherwise the heuristic is better)
+  // Validate that layer_config looks like the new format (has layer_index + module_name + match)
+  // for every rule; fall back to null if any rule is malformed
   const hasValidRules =
     Array.isArray(rawConfig) &&
     rawConfig.length > 0 &&
-    typeof rawConfig[0].layer_index === "number" &&
-    typeof rawConfig[0].module_name === "string" &&
+    rawConfig.every(
+      (r) =>
+        typeof r.layer_index === "number" &&
+        typeof r.module_name === "string" &&
+        r.match != null &&
+        typeof r.match === "object"
+    ) &&
     rawConfig.some((r) => !r.match?.is_catchall);
   const rules: FileClassificationRule[] | null = hasValidRules ? rawConfig : null;
 

@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 
 /**
  * DELETE /api/repo/[slug]
- * Resolves repo by slug and user; cascade-delete stub.
+ * Resolves repo by slug and user; deletes repository (cascade handled by DB).
  * Auth required.
  */
 export async function DELETE(
@@ -27,7 +27,7 @@ export async function DELETE(
   }
   const { data: repo, error } = await supabaseAdmin
     .from("repositories")
-    .select("user_id")
+    .select("id, user_id")
     .eq("user_id", session.user.id)
     .eq("slug", slug)
     .single();
@@ -40,8 +40,15 @@ export async function DELETE(
   if (repo.user_id !== session.user.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  return NextResponse.json(
-    { message: `TODO: implement delete repo ${slug}` },
-    { status: 200 }
-  );
+  const { error: deleteError } = await supabaseAdmin
+    .from("repositories")
+    .delete()
+    .eq("id", repo.id);
+  if (deleteError) {
+    return NextResponse.json(
+      { error: "Failed to delete repository" },
+      { status: 500 }
+    );
+  }
+  return new NextResponse(null, { status: 204 });
 }

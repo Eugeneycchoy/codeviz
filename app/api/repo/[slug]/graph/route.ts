@@ -3,49 +3,37 @@ import path from "path";
 import dagre from "dagre";
 import { auth } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase";
+import { detectStack, classifyLayerWithProfile } from "@/lib/stack-profiles";
 
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 60;
-const H_GAP = 40;
+const H_GAP = 28;
 
-const MAX_NODES_PER_ROW = 5;
-const V_ROW_GAP = 40;
-const BAND_PADDING = 50;
-const LAYER_GAP = 80;
-const ORPHAN_GAP = 80;
-const LAYER_NAMES = ["PAGES", "API ROUTES", "COMPONENTS", "LIBRARY", "CONFIG"] as const;
+const BAND_PADDING = 32;
+const LAYER_GAP = 52;
+/** Target width for each layer band so dagre x is scaled to a consistent canvas width. */
+const BAND_WIDTH = 880;
+/** Orphan grid: columns fit within band width; vertical gap and top padding. */
+const GRID_COLUMNS = Math.max(1, Math.floor(BAND_WIDTH / (NODE_WIDTH + H_GAP)));
+const V_GAP = 20;
+const ORPHAN_GRID_TOP_PADDING = 20;
 
-function computeLayerHeight(count: number): number {
-  const rows = Math.ceil(count / MAX_NODES_PER_ROW);
-  return rows * NODE_HEIGHT + (rows - 1) * V_ROW_GAP + BAND_PADDING * 2;
+function computeRole(inDegree: number, outDegree: number): string {
+  if (inDegree === 0 && outDegree > 0) return "entry";
+  if (inDegree >= 3) return "hub";
+  if (inDegree >= 2) return "shared";
+  return "leaf";
 }
 
-/**
- * Classifies a file path into a functional layer for Next.js role grouping.
- * Layer 0 = PAGES, 1 = API ROUTES, 2 = COMPONENTS, 3 = LIBRARY, 4 = CONFIG.
- */
-function classifyLayer(filePath: string): number {
-  const p = filePath.replace(/\\/g, "/");
-  if (p.startsWith("app/api/")) return 1;
-  if (p.startsWith("app/")) {
-    if (
-      p.endsWith("/page.tsx") ||
-      p.endsWith("/page.jsx") ||
-      p.endsWith("/layout.tsx") ||
-      p.endsWith("/layout.jsx")
-    )
-      return 0;
+function tryParseJson(content: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(content);
+    return typeof parsed === "object" && parsed !== null ? parsed : null;
+  } catch {
+    return null;
   }
-  if (p.startsWith("components/")) return 2;
-  if (p.startsWith("lib/")) return 3;
-  return 4;
 }
 
-/**
- * GET /api/repo/[slug]/graph
- * Resolves repo by slug and user; returns { nodes, edges, repoName } for React Flow.
- * Auth required.
- */
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string }> }
@@ -84,7 +72,7 @@ export async function GET(
 
   const { data: files, error: filesError } = await supabaseAdmin
     .from("repo_files")
-    .select("id, path")
+    .select("id, path, language")
     .eq("repo_id", repoId);
   if (filesError) {
     return NextResponse.json(
@@ -106,41 +94,74 @@ export async function GET(
   }
   const edgeList = edgeRows ?? [];
 
+  // Detect stack profile from file paths + package.json content
+  const pkgFile = fileList.find((f) => (f.path as string).endsWith("package.json"));
+  let parsedPkg: Record<string, unknown> | null = null;
+  if (pkgFile) {
+    const { data: pkgContent } = await supabaseAdmin
+      .from("repo_files")
+      .select("content")
+      .eq("id", pkgFile.id as string)
+      .single();
+    if (pkgContent?.content) {
+      parsedPkg = tryParseJson(pkgContent.content as string);
+    }
+  }
+  const profile = detectStack(
+    fileList.map((f) => ({ path: f.path as string })),
+    parsedPkg,
+  );
+
+  // Build path lookup for edge type inference
+  const filePathMap = new Map<string, string>();
+  for (const f of fileList) {
+    filePathMap.set(f.id as string, (f.path as string) ?? "");
+  }
+
+  const fileIds = new Set(fileList.map((f) => f.id as string));
+
+  // Compute degree maps
+  const inDegreeMap = new Map<string, number>();
+  const outDegreeMap = new Map<string, number>();
+  for (const e of edgeList) {
+    const src = e.source_file_id as string;
+    const tgt = e.target_file_id as string;
+    if (fileIds.has(src) && fileIds.has(tgt)) {
+      outDegreeMap.set(src, (outDegreeMap.get(src) ?? 0) + 1);
+      inDegreeMap.set(tgt, (inDegreeMap.get(tgt) ?? 0) + 1);
+    }
+  }
+
   type FileNodeItem = {
     id: string;
     type: "file";
     position: { x: number; y: number };
-    data: { label: string; path: string; layer: number; isOrphan?: boolean };
+    data: {
+      label: string;
+      path: string;
+      layer: number;
+      language: string;
+      role: string;
+      inDegree: number;
+      outDegree: number;
+      isOrphan: boolean;
+    };
   };
-  type LayerLabelNodeItem = {
-    id: string;
-    type: "layerLabel";
-    position: { x: number; y: number };
-    data: { label: string };
-    selectable: boolean;
-    draggable: boolean;
-  };
-  type SectionDividerNodeItem = {
-    id: string;
-    type: "sectionDivider";
-    position: { x: number; y: number };
-    data: { orphanCount: number };
-    selectable: boolean;
-    draggable: boolean;
-  };
-  type GraphNode = FileNodeItem | LayerLabelNodeItem | SectionDividerNodeItem;
 
-  const fileIds = new Set(fileList.map((f) => f.id as string));
-  const nodes: GraphNode[] = fileList.map((f) => {
+  const nodes: FileNodeItem[] = fileList.map((f) => {
     const id = f.id as string;
     const pathStr = (f.path as string) ?? "";
     const label = path.basename(pathStr) || pathStr || "file";
-    const layer = classifyLayer(pathStr);
+    const layer = classifyLayerWithProfile(profile, pathStr);
+    const language = (f.language as string) ?? "";
+    const inDeg = inDegreeMap.get(id) ?? 0;
+    const outDeg = outDegreeMap.get(id) ?? 0;
+    const role = computeRole(inDeg, outDeg);
     return {
       id,
       type: "file" as const,
       position: { x: 0, y: 0 },
-      data: { label, path: pathStr, layer },
+      data: { label, path: pathStr, layer, language, role, inDegree: inDeg, outDegree: outDeg, isOrphan: false },
     };
   });
 
@@ -150,14 +171,20 @@ export async function GET(
         fileIds.has(e.source_file_id as string) &&
         fileIds.has(e.target_file_id as string)
     )
-    .map((e) => ({
-      id: `e-${e.source_file_id}-${e.target_file_id}`,
-      source: e.source_file_id as string,
-      target: e.target_file_id as string,
-      animated: true,
-      markerEnd: { type: "arrowclosed" as const, color: "#3b82f6" },
-      style: { stroke: "#3b82f6", strokeWidth: 2 },
-    }));
+    .map((e) => {
+      const targetPath = filePathMap.get(e.target_file_id as string) ?? "";
+      const edgeType = profile.inferEdgeType(targetPath);
+      return {
+        id: `e-${e.source_file_id}-${e.target_file_id}`,
+        source: e.source_file_id as string,
+        target: e.target_file_id as string,
+        type: "graphEdge",
+        data: {
+          edgeType,
+          label: path.basename(targetPath),
+        },
+      };
+    });
 
   let maxY = 0;
 
@@ -167,142 +194,173 @@ export async function GET(
     connectedIds.add(e.source);
     connectedIds.add(e.target);
   }
-  const connectedNodes = fileNodes.filter((n) => connectedIds.has(n.id));
-  const orphanNodes = fileNodes.filter((n) => !connectedIds.has(n.id));
 
-  if (connectedNodes.length > 0) {
+  // Group ALL file nodes by layer
+  const layerToNodes = new Map<number, FileNodeItem[]>();
+  for (const n of fileNodes) {
+    const layerIndex = n.data.layer;
+    const list = layerToNodes.get(layerIndex) ?? [];
+    list.push(n);
+    layerToNodes.set(layerIndex, list);
+  }
+
+  // Build and layout a dagre graph per layer (only that layer's nodes and intra-layer edges)
+  type LayerBounds = { minX: number; maxX: number; minY: number; maxY: number };
+  const layerBounds = new Map<number, LayerBounds>();
+  const layerDagreGraphs = new Map<number, dagre.graphlib.Graph>();
+
+  for (const [layerIndex, layerNodes] of Array.from(layerToNodes.entries())) {
+    const layerIdSet = new Set(layerNodes.map((n) => n.id));
+    const layerEdges = edges.filter(
+      (e) => layerIdSet.has(e.source) && layerIdSet.has(e.target)
+    );
     const g = new dagre.graphlib.Graph();
-    g.setGraph({ rankdir: "TB" });
+    g.setGraph({ rankdir: "LR", ranksep: 28, nodesep: 32 });
     g.setDefaultEdgeLabel(() => ({}));
-    for (const n of connectedNodes) {
+    for (const n of layerNodes) {
       g.setNode(n.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
     }
-    for (const e of edges) {
+    for (const e of layerEdges) {
       g.setEdge(e.source, e.target);
     }
     dagre.layout(g);
+    layerDagreGraphs.set(layerIndex, g);
 
-    // Step 1 — Group connected nodes by layer and sort by dagre X.
-    const layerToNodes = new Map<number, FileNodeItem[]>();
-    for (const n of connectedNodes) {
-      const dNode = g.node(n.id);
-      const layerIndex = n.data.layer;
-      const list = layerToNodes.get(layerIndex) ?? [];
-      list.push(n);
-      layerToNodes.set(layerIndex, list);
-    }
-    Array.from(layerToNodes.values()).forEach((layerNodes) => {
-      layerNodes.sort((a, b) => {
-        const ax = g.node(a.id)?.x ?? 0;
-        const bx = g.node(b.id)?.x ?? 0;
-        return ax - bx;
-      });
-    });
-
-    // Step 2 — Compute maxRowWidth (canvas width = widest possible row).
-    const maxNodesInAnyLayer =
-      layerToNodes.size > 0
-        ? Math.max(
-            ...Array.from(layerToNodes.values()).map((arr) => arr.length)
-          )
-        : 0;
-    const maxRowWidth =
-      Math.min(maxNodesInAnyLayer, MAX_NODES_PER_ROW) * (NODE_WIDTH + H_GAP) -
-      H_GAP;
-
-    // Step 3 — Compute cumulative layer start Y positions.
-    const layerStartY = new Map<number, number>();
-    let currentY = 0;
-    for (let layerIndex = 0; layerIndex < LAYER_NAMES.length; layerIndex++) {
-      const layerNodes = layerToNodes.get(layerIndex);
-      if (layerNodes) {
-        layerStartY.set(layerIndex, currentY);
-        currentY += computeLayerHeight(layerNodes.length) + LAYER_GAP;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const node of layerNodes) {
+      const d = g.node(node.id);
+      if (d) {
+        minX = Math.min(minX, d.x);
+        maxX = Math.max(maxX, d.x);
+        minY = Math.min(minY, d.y);
+        maxY = Math.max(maxY, d.y);
       }
     }
-
-    // Step 4 — Position each node.
-    for (const [layerIndex, layerNodes] of Array.from(layerToNodes.entries())) {
-      const count = layerNodes.length;
-      const startY = layerStartY.get(layerIndex) ?? 0;
-      for (let i = 0; i < layerNodes.length; i++) {
-        const node = layerNodes[i];
-        const row = Math.floor(i / MAX_NODES_PER_ROW);
-        const col = i % MAX_NODES_PER_ROW;
-        const nodesInThisRow = Math.min(
-          MAX_NODES_PER_ROW,
-          count - row * MAX_NODES_PER_ROW
-        );
-        const rowWidth =
-          nodesInThisRow * (NODE_WIDTH + H_GAP) - H_GAP;
-        const rowStartX = (maxRowWidth - rowWidth) / 2;
-        node.position.x = rowStartX + col * (NODE_WIDTH + H_GAP);
-        node.position.y =
-          startY + BAND_PADDING + row * (NODE_HEIGHT + V_ROW_GAP);
-      }
+    if (minX === Infinity) minX = maxX = minY = maxY = 0;
+    const spanY = maxY - minY;
+    if (spanY === 0) {
+      maxY = minY + NODE_HEIGHT;
     }
+    layerBounds.set(layerIndex, { minX, maxX, minY, maxY });
+  }
 
-    // Step 5 — Inject layerLabel nodes.
-    for (const [layerIndex, layerNodes] of Array.from(layerToNodes.entries())) {
-      const count = layerNodes.length;
-      const y =
-        (layerStartY.get(layerIndex) ?? 0) + computeLayerHeight(count) / 2;
-      nodes.push({
-        id: `layer-label-${layerIndex}`,
-        type: "layerLabel",
-        position: { x: -220, y },
-        data: { label: LAYER_NAMES[layerIndex] },
-        selectable: false,
-        draggable: false,
-      });
-    }
+  /** Band height from dagre-computed span for nodes in this layer (multiple ranks within band). */
+  function getLayerBandHeight(layerIndex: number): number {
+    const bounds = layerBounds.get(layerIndex);
+    if (!bounds) return NODE_HEIGHT + BAND_PADDING * 2;
+    const spanY = bounds.maxY - bounds.minY;
+    return spanY + NODE_HEIGHT + BAND_PADDING * 2;
+  }
 
-    // Step 6 — Compute maxY for orphan section.
-    for (const [layerIndex, layerNodes] of Array.from(layerToNodes.entries())) {
-      const h = (layerStartY.get(layerIndex) ?? 0) + computeLayerHeight(layerNodes.length);
-      if (h > maxY) maxY = h;
+  // Compute layer start Y from dagre-derived band heights
+  const layerStartY = new Map<number, number>();
+  let currentY = 0;
+  for (let layerIndex = 0; layerIndex < profile.layers.length; layerIndex++) {
+    const layerNodes = layerToNodes.get(layerIndex);
+    if (layerNodes && layerNodes.length > 0) {
+      layerStartY.set(layerIndex, currentY);
+      currentY += getLayerBandHeight(layerIndex) + LAYER_GAP;
     }
   }
 
-  if (orphanNodes.length > 0) {
-    // Step 7 — Orphan grid (multi-row, same algorithm).
-    const orphanCount = orphanNodes.length;
-    const orphanMaxRowWidth =
-      Math.min(orphanCount, MAX_NODES_PER_ROW) * (NODE_WIDTH + H_GAP) - H_GAP;
-    const sectionY = maxY + ORPHAN_GAP;
-    const orphanRowY = maxY + ORPHAN_GAP * 2;
+  // Position nodes: per-layer dagre (x,y) mapped into each band
+  for (const [layerIndex, layerNodes] of Array.from(layerToNodes.entries())) {
+    const startY = layerStartY.get(layerIndex) ?? 0;
+    const bounds = layerBounds.get(layerIndex)!;
+    const bandHeight = getLayerBandHeight(layerIndex);
+    const contentHeight = bandHeight - BAND_PADDING * 2;
+    const spanX = Math.max(bounds.maxX - bounds.minX, 1);
+    const spanY = Math.max(bounds.maxY - bounds.minY, 1);
+    const dagreGraph = layerDagreGraphs.get(layerIndex)!;
 
-    nodes.push({
-      id: "orphan-divider",
-      type: "sectionDivider",
-      position: { x: 0, y: sectionY },
-      data: { orphanCount },
-      selectable: false,
-      draggable: false,
-    });
+    const connectedInLayer = layerNodes.filter((n) => connectedIds.has(n.id));
+    const orphansInLayer = layerNodes.filter((n) => !connectedIds.has(n.id));
 
-    for (let i = 0; i < orphanNodes.length; i++) {
-      const orphan = orphanNodes[i];
-      const row = Math.floor(i / MAX_NODES_PER_ROW);
-      const col = i % MAX_NODES_PER_ROW;
-      const nodesInThisRow = Math.min(
-        MAX_NODES_PER_ROW,
-        orphanCount - row * MAX_NODES_PER_ROW
-      );
-      const rowWidth =
-        nodesInThisRow * (NODE_WIDTH + H_GAP) - H_GAP;
-      const rowStartX = (orphanMaxRowWidth - rowWidth) / 2;
-      orphan.position.x = rowStartX + col * (NODE_WIDTH + H_GAP);
-      orphan.position.y = orphanRowY + row * (NODE_HEIGHT + V_ROW_GAP);
-      orphan.data.isOrphan = true;
+    // Mark orphans for this layer so response matches DependencyGraph's expected contract
+    for (const node of orphansInLayer) {
+      node.data.isOrphan = true;
     }
+
+    // Connected nodes: map this layer's dagre (x,y) to position; x scaled to band, y within band
+    for (const node of connectedInLayer) {
+      const d = dagreGraph.node(node.id);
+      if (d) {
+        const t = spanX > 0 ? (d.x - bounds.minX) / spanX : 0;
+        const scaledCenterX = Math.max(0, Math.min(1, t)) * (BAND_WIDTH - NODE_WIDTH) + NODE_WIDTH / 2;
+        node.position.x = scaledCenterX - NODE_WIDTH / 2;
+        const yOffsetInBand = spanY > 0 ? (d.y - bounds.minY) / spanY : 0;
+        const centerY = startY + BAND_PADDING + yOffsetInBand * contentHeight;
+        node.position.y = centerY - NODE_HEIGHT / 2;
+      }
+    }
+  }
+
+  for (const [layerIndex, layerNodes] of Array.from(layerToNodes.entries())) {
+    const h = (layerStartY.get(layerIndex) ?? 0) + getLayerBandHeight(layerIndex);
+    if (h > maxY) maxY = h;
+  }
+
+  const orphanCount = fileNodes.filter((n) => n.data.isOrphan).length;
+
+  const SECTION_DIVIDER_HEIGHT = 50;
+  const responseNodes: (FileNodeItem | { id: string; type: "sectionDivider"; position: { x: number; y: number }; data: { orphanCount: number } })[] = [...nodes];
+  if (orphanCount > 0) {
+    const sectionDividerY = maxY + LAYER_GAP;
+    responseNodes.push({
+      id: "section-divider-orphans",
+      type: "sectionDivider",
+      position: { x: 0, y: sectionDividerY },
+      data: { orphanCount },
+    });
+    const allOrphans = fileNodes
+      .filter((n) => n.data.isOrphan)
+      .sort((a, b) => a.data.layer - b.data.layer || a.data.path.localeCompare(b.data.path));
+    const numRows = Math.ceil(orphanCount / GRID_COLUMNS);
+    allOrphans.forEach((node, i) => {
+      const col = i % GRID_COLUMNS;
+      const row = Math.floor(i / GRID_COLUMNS);
+      node.position.x = col * (NODE_WIDTH + H_GAP);
+      node.position.y =
+        sectionDividerY +
+        SECTION_DIVIDER_HEIGHT +
+        ORPHAN_GRID_TOP_PADDING +
+        row * (NODE_HEIGHT + V_GAP);
+    });
+    maxY =
+      sectionDividerY +
+      SECTION_DIVIDER_HEIGHT +
+      ORPHAN_GRID_TOP_PADDING +
+      numRows * (NODE_HEIGHT + V_GAP);
+  }
+
+  // Build layers array for the response
+  const layers: { index: number; name: string; emoji: string; subtitle: string; startY: number; height: number; bg: string }[] = [];
+  for (const [layerIndex, startY] of Array.from(layerStartY.entries())) {
+    const layerNodes = layerToNodes.get(layerIndex);
+    if (!layerNodes || layerNodes.length === 0) continue;
+    const layerDef = profile.layers[layerIndex];
+    layers.push({
+      index: layerIndex,
+      name: layerDef.name,
+      emoji: layerDef.emoji,
+      subtitle: layerDef.subtitle,
+      startY,
+      height: getLayerBandHeight(layerIndex),
+      bg: layerDef.bg,
+    });
   }
 
   return NextResponse.json({
-    nodes,
+    nodes: responseNodes,
     edges,
+    layers,
     repoName: (repo.name as string) ?? slug,
+    stackId: profile.id,
+    stackName: profile.displayName,
     maxY,
-    orphanCount: orphanNodes.length,
+    orphanCount,
   });
 }

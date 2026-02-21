@@ -1,24 +1,36 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useMemo, type Dispatch, type SetStateAction } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   BackgroundVariant,
   Controls,
-  Panel,
   useNodesState,
   useEdgesState,
   useReactFlow,
   type Node,
   type Edge,
   type NodeProps,
+  type EdgeTypes,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { type NodeData, FileNode } from "@/components/FileNode";
+import { GraphEdge } from "@/components/GraphEdge";
+import type { EdgeFilter } from "@/components/GraphHeader";
 
-export type GraphNodeData = NodeData | LayerLabelData;
+export type GraphNodeData = NodeData | SectionDividerData;
+
+export type LayerInfo = {
+  index: number;
+  name: string;
+  emoji: string;
+  subtitle: string;
+  startY: number;
+  height: number;
+  bg: string;
+};
 
 const OrphanToggleContext = createContext<{
   collapsed: boolean;
@@ -31,32 +43,35 @@ export interface DependencyGraphProps {
   initialEdges: Edge[];
   searchTarget: string | null;
   focusedNodeId: string | null;
+  hoveredNodeId: string | null;
   onNodeSelect: (node: Node<NodeData> | null) => void;
+  onNodeHover: (nodeId: string | null) => void;
   orphanCount: number;
+  edgeFilter: EdgeFilter;
+  layers: LayerInfo[];
 }
 
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 60;
 
-const LEGEND_ITEMS = [
-  { ext: ".tsx", bg: "bg-blue-500" },
-  { ext: ".ts", bg: "bg-violet-500" },
-  { ext: ".jsx", bg: "bg-cyan-500" },
-  { ext: ".js", bg: "bg-amber-500" },
-  { ext: ".py", bg: "bg-emerald-500" },
-  { ext: ".json", bg: "bg-orange-500" },
-  { ext: ".md", bg: "bg-slate-400" },
-  { ext: ".css/.scss", bg: "bg-pink-500" },
-];
-
-const ROLE_LEGEND_ITEMS = [
-  { label: "Entry", bg: "bg-emerald-400", hint: "start here" },
-  { label: "Hub", bg: "bg-amber-400", hint: "widely used" },
-  { label: "Shared", bg: "bg-blue-400", hint: "used in 2+ places" },
-  { label: "Leaf", bg: "bg-slate-300", hint: "no dependencies" },
-];
-
 type SectionDividerData = { orphanCount?: number };
+
+type LayerLabelData = { label: string; subtitle: string };
+
+function LayerLabelNode({ data }: NodeProps<LayerLabelData>) {
+  return (
+    <div className="flex flex-col gap-0.5 pointer-events-none">
+      <span className="text-xs font-bold text-gray-700 leading-tight">
+        {data.label}
+      </span>
+      {data.subtitle ? (
+        <span className="text-[10px] font-normal text-gray-500 leading-tight">
+          {data.subtitle}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 function SectionDividerNode(_props: NodeProps<SectionDividerData>) {
   const { collapsed, count, onToggle } = useContext(OrphanToggleContext);
@@ -68,22 +83,20 @@ function SectionDividerNode(_props: NodeProps<SectionDividerData>) {
         onClick={onToggle}
         className="mt-1 flex items-center gap-1.5 cursor-pointer text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors"
       >
-        <span aria-hidden>{collapsed ? "▶" : "▼"}</span>
+        <span aria-hidden>{collapsed ? "\u25B6" : "\u25BC"}</span>
         <span>ISOLATED FILES ({count})</span>
       </button>
     </div>
   );
 }
 
-export type LayerLabelData = { label: string };
-
-function LayerLabelNode({ data }: NodeProps<LayerLabelData>) {
+function StartBadgeNode() {
   return (
     <div
-      className="text-[10px] font-bold uppercase tracking-widest text-slate-400 pointer-events-none select-none"
-      style={{ transform: "rotate(-90deg)", transformOrigin: "left center" }}
+      className="flex items-center justify-center rounded-full bg-indigo-500 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 shadow-md pointer-events-none animate-pulse"
+      style={{ boxShadow: "0 0 0 2px rgba(99, 102, 241, 0.3)" }}
     >
-      {data?.label ?? ""}
+      START
     </div>
   );
 }
@@ -92,6 +105,11 @@ const NODE_TYPES = {
   file: FileNode,
   sectionDivider: SectionDividerNode,
   layerLabel: LayerLabelNode,
+  startBadge: StartBadgeNode,
+};
+
+const EDGE_TYPES: EdgeTypes = {
+  graphEdge: GraphEdge,
 };
 
 interface GraphControllerProps {
@@ -143,17 +161,19 @@ function GraphController({ searchTarget, nodes, setNodes }: GraphControllerProps
   return null;
 }
 
-interface DependencyGraphInnerProps extends DependencyGraphProps {}
-
 function DependencyGraphInner({
   initialNodes,
   initialEdges,
   searchTarget,
   focusedNodeId,
+  hoveredNodeId,
   onNodeSelect,
+  onNodeHover,
   orphanCount,
-}: DependencyGraphInnerProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<GraphNodeData>(() =>
+  edgeFilter,
+  layers,
+}: DependencyGraphProps) {
+  const [nodes, setNodes, onNodesChange] = useNodesState<GraphNodeData>(
     initialNodes.map((n) => {
       const d = n.data as { isOrphan?: boolean };
       return d?.isOrphan ? { ...n, hidden: true } : n;
@@ -165,9 +185,16 @@ function DependencyGraphInner({
   const edgesRef = useRef(edges);
   edgesRef.current = edges;
   const prevFocusedNodeIdRef = useRef<string | null>(null);
+  const prevHoveredNodeIdRef = useRef<string | null>(null);
+
+  // Filter edges by type
+  const filteredEdges = useMemo(() => {
+    if (edgeFilter === "all") return initialEdges;
+    return initialEdges.filter((e) => e.data?.edgeType === edgeFilter);
+  }, [initialEdges, edgeFilter]);
 
   useEffect(() => {
-    setEdges(initialEdges);
+    setEdges(filteredEdges);
     const withOrphanVisibility = initialNodes.map((n) => {
       const d = n.data as { isOrphan?: boolean };
       const hidden = d?.isOrphan ? orphansCollapsed : false;
@@ -177,11 +204,11 @@ function DependencyGraphInner({
     if (!orphansCollapsed) {
       setTimeout(() => fitView({ duration: 400 }), 50);
     }
-  }, [initialNodes, initialEdges, orphansCollapsed, setNodes, setEdges, fitView]);
+  }, [initialNodes, filteredEdges, orphansCollapsed, setNodes, setEdges, fitView]);
 
-  const applyFocusOpacity = useCallback(
-    (focusedId: string | null) => {
-      if (focusedId == null) {
+  const applyHighlight = useCallback(
+    (activeId: string | null) => {
+      if (activeId == null) {
         setNodes((prev) =>
           prev.map((n) => ({
             ...n,
@@ -191,16 +218,16 @@ function DependencyGraphInner({
         setEdges((prev) =>
           prev.map((e) => ({
             ...e,
-            style: { ...(e.style ?? {}), opacity: 1 },
+            style: { ...(e.style ?? {}), opacity: 0.3 },
           }))
         );
         return;
       }
       const edgeList = edgesRef.current;
       const connectedEdgeIds = new Set<string>();
-      const connectedNodeIds = new Set<string>([focusedId]);
+      const connectedNodeIds = new Set<string>([activeId]);
       edgeList.forEach((e) => {
-        if (e.source === focusedId || e.target === focusedId) {
+        if (e.source === activeId || e.target === activeId) {
           connectedEdgeIds.add(e.id);
           connectedNodeIds.add(e.source);
           connectedNodeIds.add(e.target);
@@ -208,13 +235,13 @@ function DependencyGraphInner({
       });
       setNodes((prev) =>
         prev.map((n) => {
-          if (n.type === "sectionDivider" || n.type === "layerLabel")
+          if (n.type === "sectionDivider")
             return { ...n, style: { ...(n.style ?? {}), opacity: 1 } };
           return {
             ...n,
             style: {
               ...(n.style ?? {}),
-              opacity: connectedNodeIds.has(n.id) ? 1 : 0.2,
+              opacity: connectedNodeIds.has(n.id) ? 1 : 0.1,
             },
           };
         })
@@ -224,7 +251,7 @@ function DependencyGraphInner({
           ...e,
           style: {
             ...(e.style ?? {}),
-            opacity: connectedEdgeIds.has(e.id) ? 1 : 0.1,
+            opacity: connectedEdgeIds.has(e.id) ? 0.95 : 0.08,
           },
         }))
       );
@@ -232,63 +259,142 @@ function DependencyGraphInner({
     [setNodes, setEdges]
   );
 
+  // Apply highlight for selected node
   useEffect(() => {
     if (prevFocusedNodeIdRef.current === focusedNodeId) return;
     prevFocusedNodeIdRef.current = focusedNodeId;
-    applyFocusOpacity(focusedNodeId);
-  }, [focusedNodeId, applyFocusOpacity]);
+    // Only apply focus highlight if nothing is hovered
+    if (hoveredNodeId == null) {
+      applyHighlight(focusedNodeId);
+    }
+  }, [focusedNodeId, hoveredNodeId, applyHighlight]);
+
+  // Apply highlight for hovered node (takes priority)
+  useEffect(() => {
+    if (prevHoveredNodeIdRef.current === hoveredNodeId) return;
+    prevHoveredNodeIdRef.current = hoveredNodeId;
+    if (hoveredNodeId != null) {
+      applyHighlight(hoveredNodeId);
+    } else {
+      // Revert to focused node highlight or clear
+      applyHighlight(focusedNodeId);
+    }
+  }, [hoveredNodeId, focusedNodeId, applyHighlight]);
 
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, clickedNode: Node<NodeData>) => {
-      const edgeList = edgesRef.current;
-      const connectedEdgeIds = new Set<string>();
-      const connectedNodeIds = new Set<string>([clickedNode.id]);
-      edgeList.forEach((e) => {
-        if (e.source === clickedNode.id || e.target === clickedNode.id) {
-          connectedEdgeIds.add(e.id);
-          connectedNodeIds.add(e.source);
-          connectedNodeIds.add(e.target);
-        }
-      });
-      setNodes((prev) =>
-        prev.map((n) => {
-          if (n.type === "sectionDivider" || n.type === "layerLabel")
-            return { ...n, style: { ...(n.style ?? {}), opacity: 1 } };
-          return {
-            ...n,
-            style: {
-              ...(n.style ?? {}),
-              opacity: connectedNodeIds.has(n.id) ? 1 : 0.2,
-            },
-          };
-        })
-      );
-      setEdges((prev) =>
-        prev.map((e) => ({
-          ...e,
-          style: {
-            ...(e.style ?? {}),
-            opacity: connectedEdgeIds.has(e.id) ? 1 : 0.1,
-          },
-        }))
-      );
-      onNodeSelect(clickedNode.type === "file" ? (clickedNode as Node<NodeData>) : null);
+      if (clickedNode.type !== "file") {
+        onNodeSelect(null);
+        return;
+      }
+      onNodeSelect(clickedNode as Node<NodeData>);
     },
-    [setNodes, setEdges, onNodeSelect]
+    [onNodeSelect]
   );
 
+  const onNodeMouseEnter = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (node.type === "file") {
+        onNodeHover(node.id);
+      }
+    },
+    [onNodeHover]
+  );
+
+  const onNodeMouseLeave = useCallback(() => {
+    onNodeHover(null);
+  }, [onNodeHover]);
+
   const onPaneClick = useCallback(() => {
-    setNodes((prev) =>
-      prev.map((n) => ({ ...n, style: { ...(n.style ?? {}), opacity: 1 } }))
-    );
-    setEdges((prev) =>
-      prev.map((e) => ({
-        ...e,
-        style: { ...(e.style ?? {}), opacity: 1 },
-      }))
-    );
+    applyHighlight(null);
     onNodeSelect(null);
-  }, [setNodes, setEdges, onNodeSelect]);
+  }, [applyHighlight, onNodeSelect]);
+
+  // Build layer band nodes for background rendering
+  const layerBandNodes: Node[] = useMemo(() => {
+    // We need the maxRowWidth to size the bands. Compute from connected nodes.
+    const fileNodes = initialNodes.filter((n) => n.type === "file");
+    let maxX = 0;
+    for (const n of fileNodes) {
+      const right = (n.position?.x ?? 0) + NODE_WIDTH;
+      if (right > maxX) maxX = right;
+    }
+    const bandWidth = Math.max(maxX + 80, 900);
+
+    return layers.map((layer) => ({
+      id: `layer-band-${layer.index}`,
+      type: "group",
+      position: { x: -40, y: layer.startY },
+      data: {},
+      style: {
+        width: bandWidth,
+        height: layer.height,
+        background: layer.bg,
+        opacity: 0.55,
+        borderRadius: 10,
+        border: "none",
+        pointerEvents: "none" as const,
+        zIndex: -1,
+      },
+      selectable: false,
+      draggable: false,
+      connectable: false,
+    }));
+  }, [layers, initialNodes]);
+
+  // Build layer label nodes (title + subtitle overlay on bands)
+  const layerLabelNodes: Node[] = useMemo(() => {
+    return layers.map((layer) => ({
+      id: `layer-title-${layer.index}`,
+      type: "layerLabel",
+      position: { x: -22, y: layer.startY + 10 },
+      data: {
+        label: `${layer.emoji} ${layer.name}`,
+        subtitle: layer.subtitle,
+      },
+      selectable: false,
+      draggable: false,
+      connectable: false,
+      style: {
+        background: "transparent",
+        border: "none",
+        boxShadow: "none",
+        pointerEvents: "none" as const,
+        padding: 0,
+        width: "auto",
+      },
+    }));
+  }, [layers]);
+
+  // Pulsing START badge anchored to first entry node; visible only when nothing is selected/hovered
+  const startBadgeNodes: Node[] = useMemo(() => {
+    if (focusedNodeId != null || hoveredNodeId != null) return [];
+    const firstEntry = initialNodes.find(
+      (n) =>
+        n.type === "file" &&
+        (n.data as NodeData).role === "entry"
+    );
+    if (!firstEntry?.position) return [];
+    const x = firstEntry.position.x ?? 0;
+    const y = firstEntry.position.y ?? 0;
+    return [
+      {
+        id: "start-badge",
+        type: "startBadge",
+        position: { x: x - 4, y: y - 28 },
+        data: {},
+        selectable: false,
+        draggable: false,
+        connectable: false,
+        style: { pointerEvents: "none" as const },
+      },
+    ];
+  }, [initialNodes, focusedNodeId, hoveredNodeId]);
+
+  // Merge all nodes
+  const allNodes = useMemo(() => {
+    return [...layerBandNodes, ...layerLabelNodes, ...startBadgeNodes, ...nodes];
+  }, [layerBandNodes, layerLabelNodes, startBadgeNodes, nodes]);
 
   return (
     <OrphanToggleContext.Provider
@@ -299,72 +405,32 @@ function DependencyGraphInner({
       }}
     >
       <ReactFlow
-        nodes={nodes}
+        nodes={allNodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onPaneClick={onPaneClick}
         nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
         nodesDraggable={false}
         fitView
+        fitViewOptions={{ padding: 0.1, minZoom: 0.2, maxZoom: 1.2 }}
         className="bg-slate-50/30"
       >
         <Background variant={BackgroundVariant.Dots} gap={32} size={1} color="#e2e8f0" />
-      <Controls
-        className="bg-white border-slate-100 shadow-xl rounded-2xl overflow-hidden [&_button]:h-10 [&_button]:w-10 [&_button]:border-slate-100 [&_button]:hover:bg-slate-50 [&_button]:transition-colors"
-        showInteractive={false}
-      />
-      <GraphController
-        searchTarget={searchTarget}
-        nodes={nodes}
-        setNodes={setNodes}
-      />
-      <Panel position="bottom-center" className="mb-6">
-        <div className="px-5 py-3 rounded-2xl bg-slate-900/90 backdrop-blur-md text-white/90 text-[11px] font-bold tracking-widest uppercase flex items-center gap-4 shadow-2xl">
-          <span>Scroll to zoom</span>
-          <div className="w-px h-3 bg-white/20" />
-          <span>Pan to navigate</span>
-          <div className="w-px h-3 bg-white/20" />
-          <span>Click node to explain</span>
-        </div>
-      </Panel>
-      <Panel position="bottom-left" className="mb-6 ml-6">
-        <div className="px-4 py-3 rounded-2xl bg-white/95 backdrop-blur-md border border-slate-100 shadow-xl space-y-3">
-          <div>
-            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-              FILE TYPES
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {LEGEND_ITEMS.map(({ ext, bg }) => (
-                <span
-                  key={ext}
-                  className={`px-2 py-0.5 rounded text-[10px] font-medium text-white ${bg}`}
-                >
-                  {ext}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="h-px bg-slate-100" />
-          <div>
-            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-2">
-              ROLES
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {ROLE_LEGEND_ITEMS.map(({ label, bg, hint }) => (
-                <span
-                  key={label}
-                  className={`px-2 py-0.5 rounded text-[10px] font-medium text-slate-800 ${bg}`}
-                  title={hint}
-                >
-                  {label}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </Panel>
+        <Controls
+          className="bg-white border-slate-100 shadow-xl rounded-2xl overflow-hidden [&_button]:h-10 [&_button]:w-10 [&_button]:border-slate-100 [&_button]:hover:bg-slate-50 [&_button]:transition-colors"
+          showInteractive={false}
+          onFitView={() => fitView({ duration: 400, padding: 0.1 })}
+        />
+        <GraphController
+          searchTarget={searchTarget}
+          nodes={nodes}
+          setNodes={setNodes}
+        />
       </ReactFlow>
     </OrphanToggleContext.Provider>
   );

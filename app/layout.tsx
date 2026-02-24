@@ -4,8 +4,22 @@ import Navbar from "@/components/Navbar";
 import { SessionProviderWrapper } from "@/components/SessionProviderWrapper";
 
 export const metadata: Metadata = {
-  title: "CodeViz",
-  description: "Drop a repo, understand it instantly — interactive dependency graphs with AI-powered explanations.",
+  title: "CodeViz | Visualize repo dependencies & get AI explanations",
+  description:
+    "Drop a repo, understand it instantly. CodeViz builds interactive dependency graphs and explains any file with AI—so you can onboard faster and navigate with confidence.",
+  openGraph: {
+    title: "CodeViz | Visualize repo dependencies & get AI explanations",
+    description:
+      "Drop a repo, understand it instantly. CodeViz builds interactive dependency graphs and explains any file with AI—so you can onboard faster and navigate with confidence.",
+    type: "website",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "CodeViz | Visualize repo dependencies & get AI explanations",
+    description:
+      "Drop a repo, understand it instantly. CodeViz builds interactive dependency graphs and explains any file with AI—so you can onboard faster and navigate with confidence.",
+  },
 };
 
 export default function RootLayout({

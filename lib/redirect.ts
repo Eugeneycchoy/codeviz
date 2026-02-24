@@ -6,6 +6,9 @@ export const ALLOWED_REDIRECT_PATHS = ["/dashboard", "/repo"] as const;
 
 const ALLOWED_SET = new Set<string>(ALLOWED_REDIRECT_PATHS);
 
+/** Paths that are allowed as prefixes (e.g. /repo/foo for /repo). */
+const ALLOWED_PREFIXES = ["/repo/"] as const;
+
 const DEFAULT_REDIRECT = "/dashboard";
 
 /**
@@ -33,9 +36,14 @@ function pathnameFromUrl(url: string): string | null {
  * Returns a safe redirect path: the given path if it's in the allowlist,
  * otherwise the default. Use for client-side callbackUrl before signIn().
  */
+function isPathAllowed(path: string): boolean {
+  if (ALLOWED_SET.has(path)) return true;
+  return ALLOWED_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
 export function getSafeRedirectPath(callbackUrl: string | null | undefined): string {
   const path = pathnameFromUrl(callbackUrl ?? "");
-  if (path !== null && ALLOWED_SET.has(path)) return path;
+  if (path !== null && isPathAllowed(path)) return path;
   return DEFAULT_REDIRECT;
 }
 
@@ -47,7 +55,7 @@ export function getSafeRedirectPath(callbackUrl: string | null | undefined): str
 export function getSafeRedirectUrl(url: string, baseUrl: string): string {
   const path = pathnameFromUrl(url);
   if (path === null) return `${baseUrl}${DEFAULT_REDIRECT}`;
-  if (!ALLOWED_SET.has(path)) return `${baseUrl}${DEFAULT_REDIRECT}`;
+  if (!isPathAllowed(path)) return `${baseUrl}${DEFAULT_REDIRECT}`;
   if (url.startsWith("/") && !url.startsWith("//")) {
     return new URL(url, baseUrl).toString();
   }
